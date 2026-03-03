@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find . -type f -name \"*.py\" -o -name \"*.tsx\" -o -name \"*.ts\" -o -name \"*.json\" 2>/dev/null | head -50)"
+    ]
+  }
+}
