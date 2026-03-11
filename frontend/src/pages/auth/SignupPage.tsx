@@ -95,9 +95,8 @@ export default function SignupPage() {
     e.preventDefault()
     setLoading(true)
     try {
-      const response = await authApi.sendOtp({ email })
-      toast({ title: "OTP sent!", description: `Demo OTP: ${response.data.otp || 'check console'}` })
-      console.log('OTP:', response.data.otp)
+      await authApi.sendOtp({ email })
+      toast({ title: "OTP sent!", description: `A 6-digit verification code has been sent to ${email}` })
       setStep(2)
     } catch (error: any) {
       toast({ variant: "destructive", title: "Failed to send OTP", description: error.response?.data?.detail || "Please try again" })

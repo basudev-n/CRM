@@ -7,11 +7,15 @@ from app.auth import service
 from app import schemas
 from app.models import User, EmailOTP, RefreshToken
 from app.config import settings
+from app.utils.email import send_otp_email
 import random
 import string
 from datetime import datetime, timedelta
 import httpx
 import secrets
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -39,7 +43,12 @@ def initiate_signup(request: schemas.SendOTPRequest, db: Session = Depends(get_d
     db.add(otp_record)
     db.commit()
 
-    return {"message": "OTP sent successfully", "otp": otp}
+    # Send OTP via email
+    email_sent = send_otp_email(request.email, otp, purpose="signup")
+    if not email_sent:
+        logger.warning(f"Email not sent for {request.email} — RESEND_API_KEY may not be configured")
+
+    return {"message": "OTP sent successfully"}
 
 
 @router.post("/signup/verify", summary="Verify email OTP",
