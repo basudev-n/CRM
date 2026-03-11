@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from jose import jwt, JWTError
+import os
 from app.config import settings
 from app.database import ensure_runtime_tables, ensure_sqlite_compatibility, SessionLocal
 
@@ -153,6 +154,9 @@ Most list endpoints support filtering via query parameters specific to each enti
     },
 )
 
+# Ensure uploads directory exists
+os.makedirs("uploads", exist_ok=True)
+
 app.mount("/uploads", StaticFiles(directory="uploads", check_dir=False), name="uploads")
 
 # CORS middleware
@@ -263,5 +267,8 @@ def health_check():
 
 @app.on_event("startup")
 def startup_compatibility_fixes():
-    ensure_sqlite_compatibility()
-    ensure_runtime_tables()
+    try:
+        ensure_sqlite_compatibility()
+        ensure_runtime_tables()
+    except Exception as e:
+        print(f"Startup DB check warning (non-fatal): {e}")

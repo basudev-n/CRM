@@ -5,6 +5,7 @@ venv_new/
 
 # Environment
 .env
+.env.render
 
 # Database
 *.db

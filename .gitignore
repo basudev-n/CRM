@@ -1,5 +1,6 @@
 # Environment files with secrets
 backend/.env
+backend/.env.render
 frontend/.env
 frontend/.env.local
 frontend/.env.production
