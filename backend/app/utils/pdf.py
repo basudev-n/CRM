@@ -164,95 +164,240 @@ def generate_quotation_pdf(
     quotation_data: dict,
     organisation: dict
 ) -> bytes:
-    """Generate quotation PDF with organisation branding."""
+    """Generate quotation PDF with improved visual layout and hierarchy."""
     if not REPORTLAB_AVAILABLE:
         raise ImportError("reportlab is required for PDF generation")
 
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=A4, topMargin=0.5*inch, bottomMargin=0.5*inch)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        topMargin=0.45 * inch,
+        bottomMargin=0.45 * inch,
+        leftMargin=0.5 * inch,
+        rightMargin=0.5 * inch,
+    )
 
     styles = getSampleStyleSheet()
     elements = []
 
-    # Company Header
+    def fmt_currency(value: Optional[float]) -> str:
+        return f"Rs. {float(value or 0):,.2f}"
+
+    def fmt_date(value: Optional[str]) -> str:
+        if not value:
+            return "N/A"
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).strftime("%d %b %Y")
+        except Exception:
+            return str(value)
+
+    title_style = ParagraphStyle(
+        "QuoteTitle",
+        parent=styles["Heading1"],
+        fontName="Helvetica-Bold",
+        fontSize=22,
+        leading=24,
+        textColor=colors.HexColor("#111827"),
+        spaceAfter=4,
+    )
+    subtitle_style = ParagraphStyle(
+        "QuoteSubTitle",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=10,
+        textColor=colors.HexColor("#6B7280"),
+    )
+    block_heading_style = ParagraphStyle(
+        "BlockHeading",
+        parent=styles["Heading4"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        textColor=colors.HexColor("#111827"),
+        spaceAfter=6,
+    )
+    small_style = ParagraphStyle(
+        "SmallText",
+        parent=styles["Normal"],
+        fontName="Helvetica",
+        fontSize=9,
+        leading=12,
+        textColor=colors.HexColor("#374151"),
+    )
+
+    palette = {
+        "accent": colors.HexColor("#0A5EFF"),
+        "ink": colors.HexColor("#111827"),
+        "muted": colors.HexColor("#6B7280"),
+        "divider": colors.HexColor("#E5E7EB"),
+    }
+
     if organisation.get("logo"):
         try:
-            logo = Image(organisation["logo"], width=1.5*inch, height=0.75*inch)
-            elements.append(logo)
-        except:
-            pass
+            logo = Image(organisation["logo"], width=1.4 * inch, height=0.6 * inch)
+        except Exception:
+            logo = None
+    else:
+        logo = None
 
-    company_style = ParagraphStyle(
-        "CompanyName",
-        parent=styles["Heading1"],
-        fontSize=18,
-        spaceAfter=10,
-    )
-    elements.append(Paragraph(organisation.get("name", "Company Name"), company_style))
-
+    company_text_parts = [f"<b>{organisation.get('name', 'Company Name')}</b>"]
     if organisation.get("address"):
-        elements.append(Paragraph(organisation.get("address"), styles["Normal"]))
+        company_text_parts.append(organisation.get("address"))
+    if organisation.get("gstin"):
+        company_text_parts.append(f"GSTIN: {organisation.get('gstin')}")
+    if organisation.get("pan"):
+        company_text_parts.append(f"PAN: {organisation.get('pan')}")
 
-    elements.append(Spacer(1, 20))
-    elements.append(Paragraph("QUOTATION", styles["Heading2"]))
-    elements.append(Spacer(1, 10))
+    company_paragraph = Paragraph("<br/>".join(company_text_parts), ParagraphStyle("CompanyInfo", parent=styles["Normal"], fontSize=10, leading=14))
 
-    # Quotation Details
-    quote_info = [
-        ["Quotation Number:", quotation_data.get("quotation_number", "")],
-        ["Date:", quotation_data.get("created_at", "")],
-        ["Valid Until:", quotation_data.get("valid_until", "N/A")],
-        ["Customer:", quotation_data.get("customer_name", "")],
+    meta_table = Table([
+        [Paragraph(f"Quotation #: {quotation_data.get('quotation_number', '')}", ParagraphStyle("HeaderLabel", parent=styles["Heading3"], fontSize=12))],
+        [Paragraph(f"Date: {fmt_date(quotation_data.get('created_at'))}", styles["Normal"])],
+        [Paragraph(f"Valid until: {fmt_date(quotation_data.get('valid_until'))}", styles["Normal"])],
+    ], colWidths=[2.4 * inch])
+
+    header_data = [
+        [logo or Spacer(1, 0.2 * inch), company_paragraph, meta_table]
     ]
+    header_style = TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("LINEBELOW", (0, 0), (-1, 0), 1, palette["divider"]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+    ])
+    header_table = Table(header_data, colWidths=[1.6 * inch, 3.0 * inch, 2.2 * inch])
+    header_table.setStyle(header_style)
+    elements.append(header_table)
+    elements.append(Spacer(1, 12))
 
-    info_table = Table(quote_info, colWidths=[2*inch, 3*inch])
-    info_table.setStyle(TableStyle([
-        ("ALIGN", (0, 0), (-1, -1), "LEFT"),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
+    customer_block = Table(
+        [[
+            Paragraph("<b>Bill To</b>", styles["Heading4"]),
+            Paragraph(f"{quotation_data.get('customer_name', '—')}\n{quotation_data.get('customer_address', '')}", small_style),
+            Paragraph(f"Email: {quotation_data.get('customer_email', '-')}", small_style),
+            Paragraph(f"Phone: {quotation_data.get('customer_phone', '-')}", small_style),
+        ]]
+    )
+    customer_block.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#F3F6FF")),
+        ("BOX", (0, 0), (-1, -1), 1, palette["divider"]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 10),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 10),
+        ("TOPPADDING", (0, 0), (-1, -1), 8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
     ]))
-    elements.append(info_table)
-    elements.append(Spacer(1, 20))
+    elements.append(customer_block)
+    elements.append(Spacer(1, 12))
 
-    # Pricing Breakdown
-    elements.append(Paragraph("Price Details", styles["Heading3"]))
-    pricing_data = [
-        ["Description", "Amount (INR)"],
-        ["Base Price", f"₹{quotation_data.get('base_price', 0):,.2f}"],
+    items = []
+    if quotation_data.get("base_price"):
+        items.append({
+            "desc": "Base Price",
+            "qty": "1",
+            "rate": quotation_data.get("base_price"),
+            "amount": quotation_data.get("base_price"),
+        })
+    for extra, label in [
+        ("floor_premium", "Floor Premium"),
+        ("plc", "PLC"),
+        ("parking", "Parking"),
+        ("club_membership", "Club Membership"),
+        ("other_charges", "Other Charges"),
+    ]:
+        if quotation_data.get(extra):
+            items.append({
+                "desc": label,
+                "qty": "1",
+                "rate": quotation_data.get(extra),
+                "amount": quotation_data.get(extra),
+            })
+
+    if not items:
+        items.append({
+            "desc": f"Unit {quotation_data.get('unit_number', '')} ({quotation_data.get('unit_type', '')})",
+            "qty": "1",
+            "rate": quotation_data.get("total", 0),
+            "amount": quotation_data.get("total", 0),
+        })
+
+    header_paragraph = ParagraphStyle(
+        "TableHeader",
+        parent=styles["Normal"],
+        fontName="Helvetica-Bold",
+        fontSize=10,
+        textColor=colors.white,
+    )
+    table_data = [
+        [
+            Paragraph("Description", header_paragraph),
+            Paragraph("Qty", header_paragraph),
+            Paragraph("Rate (INR)", header_paragraph),
+            Paragraph("Amount (INR)", header_paragraph),
+        ]
     ]
-    if quotation_data.get("floor_premium"):
-        pricing_data.append(["Floor Premium", f"₹{quotation_data['floor_premium']:,.2f}"])
-    if quotation_data.get("plc"):
-        pricing_data.append(["PLC", f"₹{quotation_data['plc']:,.2f}"])
-    if quotation_data.get("parking"):
-        pricing_data.append(["Parking", f"₹{quotation_data['parking']:,.2f}"])
-    if quotation_data.get("club_membership"):
-        pricing_data.append(["Club Membership", f"₹{quotation_data['club_membership']:,.2f}"])
-    pricing_data.append(["GST", f"₹{quotation_data.get('gst_amount', 0):,.2f}"])
+    for row in items:
+        table_data.append([
+            Paragraph(row["desc"], styles["Normal"]),
+            Paragraph(row["qty"], styles["Normal"]),
+            Paragraph(fmt_currency(row["rate"]), styles["Normal"]),
+            Paragraph(fmt_currency(row["amount"]), styles["Normal"]),
+        ])
+    def append_summary(label: str, value: float):
+        table_data.append([
+            Paragraph("", styles["Normal"]),
+            Paragraph("", styles["Normal"]),
+            Paragraph(label, styles["Normal"]),
+            Paragraph(fmt_currency(value), styles["Normal"]),
+        ])
+    append_summary("GST", quotation_data.get("gst_amount", 0))
     if quotation_data.get("stamp_duty"):
-        pricing_data.append(["Stamp Duty", f"₹{quotation_data['stamp_duty']:,.2f}"])
+        append_summary("Stamp Duty", quotation_data.get("stamp_duty"))
     if quotation_data.get("registration"):
-        pricing_data.append(["Registration", f"₹{quotation_data['registration']:,.2f}"])
-    pricing_data.append(["TOTAL", f"₹{quotation_data.get('total', 0):,.2f}"])
+        append_summary("Registration", quotation_data.get("registration"))
+    table_data.append([
+        Paragraph("", styles["Normal"]),
+        Paragraph("", styles["Normal"]),
+        Paragraph("<b>Total</b>", ParagraphStyle("TotalLabel", parent=styles["Normal"], fontName="Helvetica-Bold")),
+        Paragraph(f"<b>{fmt_currency(quotation_data.get('total'))}</b>", ParagraphStyle("TotalValue", parent=styles["Normal"], fontName="Helvetica-Bold")),
+    ])
 
-    pricing_table = Table(pricing_data, colWidths=[4*inch, 2*inch])
-    pricing_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
-        ("ALIGN", (0, 0), (-1, -1), "RIGHT"),
+    prod_table = Table(table_data, colWidths=[3.2 * inch, 0.8 * inch, 1.5 * inch, 1.5 * inch], repeatRows=1)
+    prod_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), palette["accent"]),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTSIZE", (0, 0), (-1, -1), 10),
-        ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
-        ("BACKGROUND", (0, -1), (-1, -1), colors.lightgrey),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("GRID", (0, 0), (-1, -1), 0.5, palette["divider"]),
         ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("ALIGN", (2, -1), (3, -1), "RIGHT"),
     ]))
-    elements.append(pricing_table)
+    elements.append(prod_table)
+    elements.append(Spacer(1, 16))
 
-    # Terms
     if quotation_data.get("terms_conditions"):
-        elements.append(Spacer(1, 20))
-        elements.append(Paragraph("Terms & Conditions", styles["Heading4"]))
-        elements.append(Paragraph(quotation_data["terms_conditions"], styles["Normal"]))
+        elements.append(Paragraph("<b>Terms & Conditions</b>", block_heading_style))
+        elements.append(Paragraph(str(quotation_data["terms_conditions"]), small_style))
+        elements.append(Spacer(1, 8))
+
+    if quotation_data.get("notes"):
+        elements.append(Paragraph("<b>Notes</b>", block_heading_style))
+        elements.append(Paragraph(str(quotation_data["notes"]), small_style))
+        elements.append(Spacer(1, 8))
+
+    footer = Table(
+        [[
+            Paragraph("Prepared by the sales team", ParagraphStyle("FooterL", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#6B7280"))),
+            Paragraph(f"Generated on: {datetime.now().strftime('%d %b %Y, %H:%M')}", ParagraphStyle("FooterR", parent=styles["Normal"], fontSize=8, textColor=colors.HexColor("#6B7280"), alignment=2)),
+        ]],
+        colWidths=[4.2 * inch, 2.2 * inch],
+        style=TableStyle([
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+        ]),
+    )
+    elements.append(footer)
 
     doc.build(elements)
     return buffer.getvalue()

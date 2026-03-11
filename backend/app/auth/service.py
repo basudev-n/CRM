@@ -10,12 +10,35 @@ from app.schemas import SignUpRequest, LoginRequest, TokenResponse, UserResponse
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
+def truncate_to_byte_length(string: str, max_bytes: int) -> str:
+    """Truncate string to max_bytes in UTF-8 encoding"""
+    encoded = string.encode('utf-8')
+    if len(encoded) <= max_bytes:
+        return string
+    # Truncate bytes and decode, removing any incomplete characters
+    truncated_bytes = encoded[:max_bytes]
+    try:
+        return truncated_bytes.decode('utf-8')
+    except UnicodeDecodeError:
+        # If we split in the middle of a character, try removing characters from the end
+        for i in range(len(string) - 1, -1, -1):
+            try:
+                truncated_bytes = string[:i].encode('utf-8')
+                if len(truncated_bytes) <= max_bytes:
+                    return string[:i]
+            except:
+                continue
+        return ""
+
+
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    # Truncate to 72 bytes (bcrypt limit)
+    return pwd_context.verify(truncate_to_byte_length(plain_password, 72), hashed_password)
 
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    # Truncate to 72 bytes (bcrypt limit)
+    return pwd_context.hash(truncate_to_byte_length(password, 72))
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -181,3 +204,25 @@ def get_user_memberships(db: Session, user: models.User) -> list[models.OrgMembe
         models.OrgMembership.user_id == user.id,
         models.OrgMembership.is_active == True
     ).all()
+
+
+def create_tokens(db: Session, user: models.User) -> TokenResponse:
+    """Generate access and refresh tokens for a user."""
+    token_data = {"sub": str(user.id), "email": user.email}
+    access_token = create_access_token(token_data)
+    refresh_token = create_refresh_token(token_data)
+
+    # Store refresh token
+    refresh_token_obj = models.RefreshToken(
+        token=refresh_token,
+        user_id=user.id,
+        expires_at=datetime.utcnow() + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+    )
+    db.add(refresh_token_obj)
+    db.commit()
+
+    return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+
+# Alias for convenience
+hash_password = get_password_hash

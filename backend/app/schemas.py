@@ -32,6 +32,38 @@ class SignUpWithOTPRequest(BaseModel):
     last_name: Optional[str] = None
     phone: Optional[str] = None
 
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class CompleteSignupRequest(BaseModel):
+    email: EmailStr
+    otp: str = Field(..., min_length=6, max_length=6)
+    password: str = Field(..., min_length=8)
+    first_name: str
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+
+
+# Organisation Schemas
+class OrganisationCreate(BaseModel):
+    name: str
+    type: str = "developer"
+    rera_number: Optional[str] = None
+    timezone: str = "Asia/Kolkata"
+    currency: str = "INR"
+
 
 class UserResponse(BaseModel):
     id: int
@@ -56,6 +88,12 @@ class UserBrief(BaseModel):
         from_attributes = True
 
 
+class UserUpdateRequest(BaseModel):
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    phone: Optional[str] = None
+
+
 # Organisation Schemas
 class OrganisationCreate(BaseModel):
     name: str
@@ -71,7 +109,6 @@ class OrganisationResponse(BaseModel):
     type: str
     rera_number: Optional[str]
     logo: Optional[str]
-    cover_image: Optional[str]
     timezone: str
     currency: str
     gstin: Optional[str]
@@ -93,6 +130,26 @@ class InviteUserRequest(BaseModel):
 class InviteResponse(BaseModel):
     message: str
     invite_id: int
+    invite_token: str
+
+
+class AcceptInviteRequest(BaseModel):
+    invite_token: str
+    password: str = Field(..., min_length=8)
+    phone: Optional[str] = None
+
+
+class PendingInviteResponse(BaseModel):
+    id: int
+    email: str
+    first_name: str
+    last_name: Optional[str]
+    role: str
+    expires_at: datetime
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
 
 
 # Contact Schemas
@@ -213,7 +270,6 @@ class PipelineStageResponse(BaseModel):
     name: str
     color: str
     order: int
-    is_default: bool
     is_won: bool
     is_lost: bool
 
@@ -264,6 +320,9 @@ class TaskCreate(BaseModel):
     priority: str = "medium"
     assignee_id: int
     due_date: Optional[datetime] = None
+    is_recurring: bool = False
+    recurrence_pattern: Optional[str] = None
+    recurrence_interval: int = 1
 
 
 class TaskUpdate(BaseModel):
@@ -290,6 +349,10 @@ class TaskResponse(BaseModel):
     due_date: Optional[datetime]
     completed_at: Optional[datetime]
     completion_notes: Optional[str]
+    is_recurring: bool
+    recurrence_pattern: Optional[str]
+    recurrence_interval: int
+    parent_task_id: Optional[int]
     created_at: datetime
     assignee: Optional[UserBrief] = None
     lead: Optional[LeadResponse] = None
@@ -496,6 +559,26 @@ class QuotationResponse(BaseModel):
         from_attributes = True
 
 
+class QuotationShareResponse(BaseModel):
+    token: str
+    share_url: str
+    status: str
+    expires_at: Optional[datetime]
+    created_at: datetime
+    organisation_name: Optional[str] = None
+    organisation_logo: Optional[str] = None
+    organisation_address: Optional[str] = None
+
+
+class SharedQuotationResponse(BaseModel):
+    share: QuotationShareResponse
+    quotation: QuotationResponse
+
+
+class QuotationShareAction(BaseModel):
+    action: str
+
+
 # Booking Schemas
 class BookingCreate(BaseModel):
     lead_id: int
@@ -569,6 +652,14 @@ class BookingResponse(BaseModel):
 # Invoice Schemas
 class InvoiceCreate(BaseModel):
     booking_id: int
+    invoice_date: datetime
+    due_date: Optional[datetime] = None
+    milestone_name: Optional[str] = None
+    milestone_percentage: Optional[float] = None
+    notes: Optional[str] = None
+
+
+class QuotationInvoiceCreate(BaseModel):
     invoice_date: datetime
     due_date: Optional[datetime] = None
     milestone_name: Optional[str] = None
@@ -668,3 +759,148 @@ class PaymentScheduleResponse(BaseModel):
 class PaginatedResponse(BaseModel):
     data: list
     meta: dict
+
+
+# Inventory Schemas
+class ProjectCreate(BaseModel):
+    name: str
+    project_type: str
+    rera_number: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pin: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    status: str = "pre_launch"
+    description: Optional[str] = None
+    master_plan: Optional[str] = None
+    brochure: Optional[str] = None
+    gallery: Optional[str] = None
+    amenities: Optional[str] = None
+    completion_timeline: Optional[datetime] = None
+
+
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    project_type: Optional[str] = None
+    rera_number: Optional[str] = None
+    address: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    pin: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+    status: Optional[str] = None
+    description: Optional[str] = None
+    master_plan: Optional[str] = None
+    brochure: Optional[str] = None
+    gallery: Optional[str] = None
+    amenities: Optional[str] = None
+    completion_timeline: Optional[datetime] = None
+
+
+class ProjectResponse(BaseModel):
+    id: int
+    organisation_id: int
+    name: str
+    project_type: str
+    rera_number: Optional[str]
+    address: Optional[str]
+    city: Optional[str]
+    state: Optional[str]
+    pin: Optional[str]
+    latitude: Optional[float]
+    longitude: Optional[float]
+    status: str
+    description: Optional[str]
+    master_plan: Optional[str]
+    brochure: Optional[str]
+    gallery: Optional[str]
+    amenities: Optional[str]
+    completion_timeline: Optional[datetime]
+    created_by: int
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class TowerCreate(BaseModel):
+    project_id: int
+    name: str
+    floors_count: int = 0
+
+
+class TowerUpdate(BaseModel):
+    name: Optional[str] = None
+    floors_count: Optional[int] = None
+
+
+class TowerResponse(BaseModel):
+    id: int
+    project_id: int
+    name: str
+    floors_count: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class UnitCreate(BaseModel):
+    tower_id: int
+    floor: int
+    unit_number: str
+    unit_type: str
+    carpet_area: Optional[float] = None
+    built_up_area: Optional[float] = None
+    super_built_up_area: Optional[float] = None
+    facing: Optional[str] = None
+    floor_premium: float = 0
+    base_price: float = 0
+    total_price: Optional[float] = None
+    status: str = "available"
+
+
+class UnitUpdate(BaseModel):
+    floor: Optional[int] = None
+    unit_number: Optional[str] = None
+    unit_type: Optional[str] = None
+    carpet_area: Optional[float] = None
+    built_up_area: Optional[float] = None
+    super_built_up_area: Optional[float] = None
+    facing: Optional[str] = None
+    floor_premium: Optional[float] = None
+    base_price: Optional[float] = None
+    total_price: Optional[float] = None
+    status: Optional[str] = None
+    linked_lead_id: Optional[int] = None
+    linked_booking_id: Optional[int] = None
+    hold_until: Optional[datetime] = None
+
+
+class UnitResponse(BaseModel):
+    id: int
+    organisation_id: int
+    tower_id: int
+    floor: int
+    unit_number: str
+    unit_type: str
+    carpet_area: Optional[float]
+    built_up_area: Optional[float]
+    super_built_up_area: Optional[float]
+    facing: Optional[str]
+    floor_premium: float
+    base_price: float
+    total_price: Optional[float]
+    status: str
+    linked_lead_id: Optional[int]
+    linked_booking_id: Optional[int]
+    hold_until: Optional[datetime]
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True

@@ -5,9 +5,10 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import { api } from "@/services/api"
+import { DatePicker } from "@/components/ui/date-picker"
+import { financeApi } from "@/services/api"
 import { useToast } from "@/components/ui/use-toast"
-import { FileText, Plus, DollarSign, Clock, CheckCircle, AlertCircle } from "lucide-react"
+import { FileText, Plus, DollarSign, Clock, CheckCircle, AlertCircle, Download } from "lucide-react"
 
 export default function InvoicesPage() {
   const [page, setPage] = useState(1)
@@ -26,16 +27,16 @@ export default function InvoicesPage() {
 
   const { data: bookingsData } = useQuery({
     queryKey: ["bookings-list"],
-    queryFn: () => api.get(`/finance/bookings?per_page=100`).then((res) => res.data),
+    queryFn: () => financeApi.listBookings({ per_page: 100 }).then((res) => res.data),
   })
 
   const { data, isLoading } = useQuery({
     queryKey: ["invoices"],
-    queryFn: () => api.get(`/finance/invoices?page=${page}&per_page=20`).then((res) => res.data),
+    queryFn: () => financeApi.listInvoices({ page, per_page: 20 }).then((res) => res.data),
   })
 
   const createMutation = useMutation({
-    mutationFn: (data: any) => api.post("/finance/invoices", data),
+    mutationFn: (data: any) => financeApi.createInvoice(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["invoices"] })
       setShowCreateModal(false)
@@ -56,6 +57,23 @@ export default function InvoicesPage() {
       milestone_percentage: formData.milestone_percentage ? parseFloat(formData.milestone_percentage) : null,
       notes: formData.notes || null,
     })
+  }
+
+  const downloadInvoice = async (invoiceId: number, invoiceNumber: string) => {
+    try {
+      const res = await financeApi.downloadInvoicePdf(invoiceId)
+      const blob = new Blob([res.data], { type: "application/pdf" })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `invoice_${invoiceNumber}.pdf`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch {
+      toast({ variant: "destructive", title: "Failed to download invoice PDF" })
+    }
   }
 
   const getStatusColor = (status: string) => {
@@ -84,7 +102,7 @@ export default function InvoicesPage() {
       case "issued":
         return <Clock className="h-4 w-4 text-blue-500" />
       default:
-        return <FileText className="h-4 w-4 text-gray-400" />
+        return <FileText className="h-4 w-4 text-zinc-400" />
     }
   }
 
@@ -97,35 +115,35 @@ export default function InvoicesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-8">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Invoices</h1>
-          <p className="text-gray-500 mt-1">Manage invoices and demand notes</p>
+          <h1 className="text-4xl md:text-5xl font-light text-zinc-900 leading-tight">Invoice <span className="font-semibold">Management</span></h1>
+          <p className="text-zinc-500 mt-2">Manage invoices and demand notes</p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>
+        <Button className="rounded-full bg-zinc-900 hover:bg-zinc-800 text-white px-6" onClick={() => setShowCreateModal(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Create Invoice
         </Button>
       </div>
 
       {/* Invoices List */}
-      <Card>
-        <CardContent className="p-0">
+      <div className="bg-white rounded-3xl border border-zinc-200 overflow-hidden">
+        <div className="p-0">
           {isLoading ? (
             <div className="text-center py-10">Loading...</div>
           ) : (
             <div className="divide-y">
               {data?.data?.map((invoice: any) => (
-                <div key={invoice.id} className="p-4 flex items-start gap-4 hover:bg-gray-50">
+                <div key={invoice.id} className="p-4 flex items-start gap-4 hover:bg-zinc-50">
                   {getStatusIcon(invoice.status)}
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <p className="font-medium">{invoice.invoice_number}</p>
                       <Badge variant={getStatusColor(invoice.status)}>{invoice.status}</Badge>
                     </div>
-                    <p className="text-sm text-gray-500">{invoice.customer_name}</p>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-sm text-zinc-500">{invoice.customer_name}</p>
+                    <p className="text-sm text-zinc-500">
                       {invoice.project_name} {invoice.unit_number && `- ${invoice.unit_number}`}
                       {invoice.milestone_name && ` - ${invoice.milestone_name}`}
                     </p>
@@ -135,24 +153,33 @@ export default function InvoicesPage() {
                     {invoice.balance_amount > 0 && (
                       <p className="text-sm text-red-500">Balance: {formatCurrency(invoice.balance_amount)}</p>
                     )}
-                    <p className="text-xs text-gray-400 mt-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() => downloadInvoice(invoice.id, invoice.invoice_number)}
+                    >
+                      <Download className="h-4 w-4 mr-1" />
+                      PDF
+                    </Button>
+                    <p className="text-xs text-zinc-400 mt-1">
                       Due: {invoice.due_date ? new Date(invoice.due_date).toLocaleDateString() : "N/A"}
                     </p>
                   </div>
                 </div>
               ))}
               {data?.data?.length === 0 && (
-                <div className="text-center py-10 text-gray-500">No invoices found</div>
+                <div className="text-center py-10 text-zinc-500">No invoices found</div>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Create Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <Card className="w-full max-w-lg">
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
+          <Card className="w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] overflow-y-auto rounded-t-2xl sm:rounded-xl">
             <CardHeader>
               <CardTitle>Create Invoice</CardTitle>
             </CardHeader>
@@ -183,21 +210,11 @@ export default function InvoicesPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
                     <Label htmlFor="invoice_date">Invoice Date</Label>
-                    <Input
-                      id="invoice_date"
-                      type="date"
-                      value={formData.invoice_date}
-                      onChange={(e) => setFormData({ ...formData, invoice_date: e.target.value })}
-                    />
+                    <DatePicker value={formData.invoice_date} onChange={(value) => setFormData({ ...formData, invoice_date: value })} />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="due_date">Due Date</Label>
-                    <Input
-                      id="due_date"
-                      type="date"
-                      value={formData.due_date}
-                      onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                    />
+                    <DatePicker value={formData.due_date} onChange={(value) => setFormData({ ...formData, due_date: value })} />
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">

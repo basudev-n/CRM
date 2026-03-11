@@ -5,7 +5,9 @@ from app.core.auth import get_current_user
 from app import schemas, models
 from app.models import User
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from io import BytesIO
+from app.config import settings
 import uuid
 
 router = APIRouter(prefix="/finance", tags=["finance"])
@@ -20,9 +22,51 @@ def get_user_org(db: Session, user: User):
     return membership.organisation if membership else None
 
 
+def sync_overdue_invoices(db: Session, organisation_id: int, notify: bool = False) -> dict:
+    """Mark overdue invoices and optionally create in-app notifications."""
+    now = datetime.utcnow()
+    overdue_candidates = db.query(models.Invoice).filter(
+        models.Invoice.organisation_id == organisation_id,
+        models.Invoice.due_date.isnot(None),
+        models.Invoice.due_date < now,
+        models.Invoice.balance_amount > 0,
+        models.Invoice.status.notin_(["paid", "cancelled", "overdue"])
+    ).all()
+
+    marked = 0
+    notified = 0
+    for invoice in overdue_candidates:
+        invoice.status = "overdue"
+        marked += 1
+
+        if notify and invoice.created_by:
+            notification = models.Notification(
+                user_id=invoice.created_by,
+                organisation_id=organisation_id,
+                notification_type="payment_due",
+                title=f"Invoice overdue: {invoice.invoice_number}",
+                message=f"{invoice.customer_name} has overdue balance of {invoice.balance_amount:.2f}",
+                link=f"/finance/invoices"
+            )
+            db.add(notification)
+            notified += 1
+
+    return {"marked_overdue": marked, "notifications_created": notified}
+
+
 # ============== COST SHEETS ==============
 
-@router.post("/cost-sheets", status_code=status.HTTP_201_CREATED)
+@router.post("/cost-sheets", status_code=status.HTTP_201_CREATED,
+             summary="Create cost sheet",
+             description="""
+Create a detailed cost sheet for a property unit.
+
+**Automatic Calculations**:
+- Base cost = Area × Base Rate
+- Floor premium calculation
+- Tax breakdown (GST, Stamp Duty, Registration)
+- Grand total with all charges
+             """)
 def create_cost_sheet(
     request: schemas.CostSheetCreate,
     db: Session = Depends(get_db),
@@ -105,6 +149,11 @@ def generate_quotation_number(org_id: int) -> str:
     return f"QT-{org_id}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
 
 
+def build_share_url(token: str) -> str:
+    base = settings.FRONTEND_BASE_URL.rstrip("/")
+    return f"{base}/quotation/share/{token}"
+
+
 @router.post("/quotations", status_code=status.HTTP_201_CREATED)
 def create_quotation(
     request: schemas.QuotationCreate,
@@ -160,6 +209,48 @@ def create_quotation(
     return quotation
 
 
+@router.post("/quotations/{quotation_id}/share", status_code=status.HTTP_201_CREATED, response_model=schemas.QuotationShareResponse)
+def share_quotation(
+    quotation_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a shareable quotation link."""
+    organisation = get_user_org(db, current_user)
+    if not organisation:
+        raise HTTPException(status_code=403, detail="No organisation found")
+
+    quotation = db.query(models.Quotation).filter(
+        models.Quotation.id == quotation_id,
+        models.Quotation.organisation_id == organisation.id
+    ).first()
+
+    if not quotation:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+
+    share = models.QuotationShare(
+        organisation_id=organisation.id,
+        quotation_id=quotation.id,
+        token=uuid.uuid4().hex,
+        expires_at=datetime.utcnow() + timedelta(days=7),
+    )
+
+    db.add(share)
+    db.commit()
+    db.refresh(share)
+
+    return schemas.QuotationShareResponse(
+        token=share.token,
+        share_url=build_share_url(share.token),
+        status=share.status,
+        expires_at=share.expires_at,
+        created_at=share.created_at,
+        organisation_name=organisation.name,
+        organisation_logo=organisation.logo,
+        organisation_address=organisation.address,
+    )
+
+
 @router.get("/quotations", status_code=status.HTTP_200_OK)
 def list_quotations(
     page: int = Query(1, ge=1),
@@ -191,6 +282,87 @@ def list_quotations(
         "data": quotations,
         "meta": {"total": total, "page": page, "per_page": per_page, "pages": (total + per_page - 1) // per_page}
     }
+
+
+@router.get("/quotation-share/{token}", status_code=status.HTTP_200_OK, response_model=schemas.SharedQuotationResponse)
+def get_shared_quotation(
+    token: str,
+    db: Session = Depends(get_db)
+):
+    """Public access to a shared quotation."""
+    share = db.query(models.QuotationShare).filter(
+        models.QuotationShare.token == token
+    ).first()
+
+    if not share or (share.expires_at and share.expires_at < datetime.utcnow()):
+        raise HTTPException(status_code=404, detail="Shared quotation not found")
+
+    quotation = db.query(models.Quotation).filter(
+        models.Quotation.id == share.quotation_id
+    ).first()
+
+    if not quotation:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+
+    organisation = share.organisation or db.query(models.Organisation).filter(models.Organisation.id == share.organisation_id).first()
+
+    share_obj = schemas.QuotationShareResponse(
+        token=share.token,
+        share_url=build_share_url(share.token),
+        status=share.status,
+        expires_at=share.expires_at,
+        created_at=share.created_at,
+        organisation_name=organisation.name if organisation else None,
+        organisation_logo=organisation.logo if organisation else None,
+        organisation_address=organisation.address if organisation else None,
+    )
+
+    return schemas.SharedQuotationResponse(
+        share=share_obj,
+        quotation=schemas.QuotationResponse.from_orm(quotation),
+    )
+
+
+@router.post("/quotation-share/{token}/action", status_code=status.HTTP_200_OK)
+def action_shared_quotation(
+    token: str,
+    request: schemas.QuotationShareAction,
+    db: Session = Depends(get_db)
+):
+    """Approve or reject a shared quotation."""
+    share = db.query(models.QuotationShare).filter(
+        models.QuotationShare.token == token
+    ).first()
+
+    if not share or (share.expires_at and share.expires_at < datetime.utcnow()):
+        raise HTTPException(status_code=404, detail="Shared quotation not found")
+
+    if share.status != "pending":
+        raise HTTPException(status_code=400, detail="Share already acted upon")
+
+    quotation = db.query(models.Quotation).filter(
+        models.Quotation.id == share.quotation_id
+    ).first()
+
+    if not quotation:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+
+    action = request.action.lower()
+    if action == "approve":
+        share.status = "accepted"
+        quotation.status = "accepted"
+    elif action == "reject":
+        share.status = "rejected"
+        quotation.status = "rejected"
+    else:
+        raise HTTPException(status_code=400, detail="Invalid action")
+
+    share.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(share)
+    db.refresh(quotation)
+
+    return {"status": share.status, "quotation_status": quotation.status}
 
 
 @router.get("/quotations/{quotation_id}", status_code=status.HTTP_200_OK)
@@ -412,7 +584,15 @@ def generate_invoice_number(org_id: int) -> str:
     return f"INV-{org_id}-{datetime.utcnow().strftime('%Y%m%d')}-{uuid.uuid4().hex[:6].upper()}"
 
 
-@router.post("/invoices", status_code=status.HTTP_201_CREATED)
+@router.post("/invoices", status_code=status.HTTP_201_CREATED,
+             summary="Create invoice",
+             description="""
+Create an invoice for a booking.
+
+**Invoice Number**: Auto-generated in format `INV-{org_id}-{date}-{uuid}`
+
+**Status Flow**: draft → sent → partially_paid → paid
+             """)
 def create_invoice(
     request: schemas.InvoiceCreate,
     db: Session = Depends(get_db),
@@ -462,6 +642,93 @@ def create_invoice(
     return invoice
 
 
+@router.post("/quotations/{quotation_id}/invoice", status_code=status.HTTP_201_CREATED, response_model=schemas.InvoiceResponse)
+def create_invoice_from_quotation(
+    quotation_id: int,
+    request: schemas.QuotationInvoiceCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    organisation = get_user_org(db, current_user)
+    if not organisation:
+        raise HTTPException(status_code=403, detail="No organisation found")
+
+    quotation = db.query(models.Quotation).filter(
+        models.Quotation.id == quotation_id,
+        models.Quotation.organisation_id == organisation.id
+    ).first()
+
+    if not quotation:
+        raise HTTPException(status_code=404, detail="Quotation not found")
+
+    lead = db.query(models.Lead).filter(
+        models.Lead.id == quotation.lead_id,
+        models.Lead.organisation_id == organisation.id
+    ).first()
+
+    if lead:
+        lead.status = "won"
+
+    booking = models.Booking(
+        organisation_id=organisation.id,
+        lead_id=quotation.lead_id,
+        quotation_id=quotation.id,
+        booking_number=generate_booking_number(organisation.id),
+        booking_date=datetime.utcnow(),
+        booking_amount=quotation.total,
+        project_name=quotation.project_name,
+        tower=quotation.tower,
+        unit_number=quotation.unit_number,
+        unit_type=quotation.unit_type,
+        area_sqft=quotation.area_sqft,
+        customer_name=quotation.customer_name,
+        customer_email=quotation.customer_email,
+        customer_phone=quotation.customer_phone,
+        customer_address=quotation.customer_address,
+        agreement_value=quotation.total,
+        status="booked",
+        created_by=current_user.id
+    )
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+
+    if request.milestone_percentage:
+        amount = booking.agreement_value * (request.milestone_percentage / 100)
+        milestone_name = request.milestone_name or f"{request.milestone_percentage}% milestone"
+    else:
+        amount = booking.agreement_value
+        milestone_name = request.milestone_name
+
+    invoice = models.Invoice(
+        organisation_id=organisation.id,
+        booking_id=booking.id,
+        invoice_number=generate_invoice_number(organisation.id),
+        invoice_date=request.invoice_date,
+        due_date=request.due_date,
+        customer_name=booking.customer_name,
+        customer_email=booking.customer_email,
+        customer_address=booking.customer_address,
+        project_name=booking.project_name,
+        unit_number=booking.unit_number,
+        total_amount=amount,
+        paid_amount=0,
+        balance_amount=amount,
+        milestone_name=milestone_name,
+        milestone_percentage=request.milestone_percentage,
+        notes=request.notes,
+        created_by=current_user.id
+    )
+
+    quotation.status = "accepted"
+    db.add(invoice)
+    db.commit()
+    db.refresh(invoice)
+    db.refresh(quotation)
+
+    return invoice
+
+
 @router.get("/invoices", status_code=status.HTTP_200_OK)
 def list_invoices(
     page: int = Query(1, ge=1),
@@ -474,6 +741,10 @@ def list_invoices(
     organisation = get_user_org(db, current_user)
     if not organisation:
         raise HTTPException(status_code=403, detail="No organisation found")
+
+    # Keep invoice statuses aligned with due dates before listing.
+    sync_overdue_invoices(db, organisation.id, notify=False)
+    db.commit()
 
     query = db.query(models.Invoice).filter(
         models.Invoice.organisation_id == organisation.id
@@ -550,7 +821,11 @@ def create_payment(
             invoice.paid_amount += request.amount
             invoice.balance_amount = invoice.total_amount - invoice.paid_amount
             if invoice.balance_amount <= 0:
-                invoice.status = models.InvoiceStatus.PAID
+                invoice.status = "paid"
+            elif invoice.due_date and invoice.due_date < datetime.utcnow():
+                invoice.status = "overdue"
+            else:
+                invoice.status = "issued"
 
     db.commit()
     db.refresh(payment)
@@ -622,6 +897,37 @@ def create_payment_schedule(
     return schedule
 
 
+@router.get("/payment-schedule", status_code=status.HTTP_200_OK)
+def list_payment_schedule(
+    booking_id: Optional[int] = None,
+    page: int = Query(1, ge=1),
+    per_page: int = Query(50, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List payment schedule milestones."""
+    organisation = get_user_org(db, current_user)
+    if not organisation:
+        raise HTTPException(status_code=403, detail="No organisation found")
+
+    query = db.query(models.PaymentSchedule).filter(
+        models.PaymentSchedule.organisation_id == organisation.id
+    )
+    if booking_id:
+        query = query.filter(models.PaymentSchedule.booking_id == booking_id)
+
+    total = query.count()
+    schedules = query.order_by(
+        models.PaymentSchedule.due_date.asc().nulls_last(),
+        models.PaymentSchedule.created_at.desc()
+    ).offset((page - 1) * per_page).limit(per_page).all()
+
+    return {
+        "data": schedules,
+        "meta": {"total": total, "page": page, "per_page": per_page, "pages": (total + per_page - 1) // per_page}
+    }
+
+
 # ============== FINANCE DASHBOARD ==============
 
 @router.get("/dashboard", status_code=status.HTTP_200_OK)
@@ -634,11 +940,15 @@ def get_finance_dashboard(
     if not organisation:
         raise HTTPException(status_code=403, detail="No organisation found")
 
+    # Ensure overdue data is current for dashboard metrics.
+    sync_overdue_invoices(db, organisation.id, notify=False)
+    db.commit()
+
     # Total receivables (sum of all invoice balances)
     from sqlalchemy import func
     total_receivables = db.query(func.sum(models.Invoice.balance_amount)).filter(
         models.Invoice.organisation_id == organisation.id,
-        models.Invoice.status != models.InvoiceStatus.CANCELLED
+        models.Invoice.status != "cancelled"
     ).scalar() or 0
 
     # Collected amount (sum of all payments)
@@ -650,7 +960,7 @@ def get_finance_dashboard(
     overdue_amount = db.query(func.sum(models.Invoice.balance_amount)).filter(
         models.Invoice.organisation_id == organisation.id,
         models.Invoice.due_date < datetime.utcnow(),
-        models.Invoice.status == models.InvoiceStatus.OVERDUE
+        models.Invoice.status == "overdue"
     ).scalar() or 0
 
     # Collection efficiency
@@ -716,6 +1026,49 @@ def get_finance_dashboard(
     }
 
 
+@router.post("/overdue/check", status_code=status.HTTP_200_OK)
+def check_overdue_invoices(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Mark overdue invoices and create notifications."""
+    organisation = get_user_org(db, current_user)
+    if not organisation:
+        raise HTTPException(status_code=403, detail="No organisation found")
+
+    result = sync_overdue_invoices(db, organisation.id, notify=True)
+    db.commit()
+    return result
+
+
+@router.get("/overdue-invoices", status_code=status.HTTP_200_OK)
+def list_overdue_invoices(
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List overdue invoices."""
+    organisation = get_user_org(db, current_user)
+    if not organisation:
+        raise HTTPException(status_code=403, detail="No organisation found")
+
+    sync_overdue_invoices(db, organisation.id, notify=False)
+    db.commit()
+
+    query = db.query(models.Invoice).filter(
+        models.Invoice.organisation_id == organisation.id,
+        models.Invoice.status == "overdue"
+    )
+    total = query.count()
+    invoices = query.order_by(models.Invoice.due_date.asc(), models.Invoice.created_at.desc())\
+        .offset((page - 1) * per_page).limit(per_page).all()
+    return {
+        "data": invoices,
+        "meta": {"total": total, "page": page, "per_page": per_page, "pages": (total + per_page - 1) // per_page}
+    }
+
+
 # ============== PDF DOWNLOADS ==============
 
 @router.get("/invoices/{invoice_id}/pdf")
@@ -747,14 +1100,10 @@ def download_invoice_pdf(
         raise HTTPException(status_code=404, detail="Invoice not found")
 
     # Get booking
-    booking = db.query(models.Booking).filter(
-        models.Booking.id == invoice.booking_id
-    ).first()
+    booking = db.query(models.Booking).filter(models.Booking.id == invoice.booking_id).first()
 
     # Get payments
-    payments = db.query(models.Payment).filter(
-        models.Payment.booking_id == booking.id
-    ).all()
+    payments = db.query(models.Payment).filter(models.Payment.booking_id == invoice.booking_id).all()
 
     # Prepare data
     invoice_data = {
@@ -776,18 +1125,18 @@ def download_invoice_pdf(
     }
 
     booking_data = {
-        "customer_name": booking.customer_name,
-        "project_name": booking.project_name,
-        "unit_number": booking.unit_number,
-        "unit_type": booking.unit_type,
-        "area_sqft": booking.area_sqft,
+        "customer_name": booking.customer_name if booking else "",
+        "project_name": booking.project_name if booking else "",
+        "unit_number": booking.unit_number if booking else "",
+        "unit_type": booking.unit_type if booking else "",
+        "area_sqft": booking.area_sqft if booking else None,
     }
 
     payment_list = [
         {
             "payment_date": p.payment_date.strftime("%Y-%m-%d") if p.payment_date else "",
             "amount": p.amount,
-            "payment_method": p.payment_method.value if p.payment_method else "",
+            "payment_method": p.payment_method if p.payment_method else "",
             "reference_number": p.reference_number,
         }
         for p in payments
@@ -869,157 +1218,3 @@ def download_quotation_pdf(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF generation failed: {str(e)}")
-
-
-# ============== PDF DOWNLOADS ==============
-
-@router.get("/invoices/{invoice_id}/pdf")
-def download_invoice_pdf(
-    invoice_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Download invoice as PDF with organisation branding."""
-    from fastapi.responses import StreamingResponse
-    from app.utils.pdf import generate_invoice_pdf, REPORTLAB_AVAILABLE
-
-    if not REPORTLAB_AVAILABLE:
-        raise HTTPException(
-            status_code=501,
-            detail="PDF generation not available. Install reportlab."
-        )
-
-    organisation = get_user_org(db, current_user)
-    if not organisation:
-        raise HTTPException(status_code=403, detail="No organisation found")
-
-    # Get invoice
-    invoice = db.query(models.Invoice).filter(
-        models.Invoice.id == invoice_id,
-        models.Invoice.organisation_id == organisation.id
-    ).first()
-    if not invoice:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-
-    # Get booking
-    booking = db.query(models.Booking).filter(
-        models.Booking.id == invoice.booking_id
-    ).first()
-
-    # Get payments
-    payments = db.query(models.Payment).filter(
-        models.Payment.booking_id == invoice.booking_id
-    ).all()
-
-    # Prepare data
-    invoice_data = {
-        "invoice_number": invoice.invoice_number,
-        "invoice_date": invoice.invoice_date.isoformat() if invoice.invoice_date else "",
-        "due_date": invoice.due_date.isoformat() if invoice.due_date else "",
-        "total_amount": invoice.total_amount,
-        "paid_amount": invoice.paid_amount,
-        "balance_amount": invoice.balance_amount,
-        "notes": invoice.notes,
-    }
-
-    org_data = {
-        "name": organisation.name,
-        "logo": organisation.logo,
-        "address": organisation.address,
-        "gstin": organisation.gstin,
-        "pan": organisation.pan,
-    }
-
-    booking_data = {
-        "customer_name": booking.customer_name if booking else "",
-        "project_name": booking.project_name if booking else "",
-        "unit_number": booking.unit_number if booking else "",
-        "unit_type": booking.unit_type if booking else "",
-        "area_sqft": booking.area_sqft if booking else None,
-    }
-
-    payment_list = [
-        {
-            "payment_date": p.payment_date.isoformat() if p.payment_date else "",
-            "amount": p.amount,
-            "payment_method": p.payment_method.value if p.payment_method else "",
-            "reference_number": p.reference_number,
-        }
-        for p in payments
-    ]
-
-    # Generate PDF
-    pdf_content = generate_invoice_pdf(invoice_data, org_data, booking_data, payment_list)
-
-    return StreamingResponse(
-        BytesIO(pdf_content),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"attachment; filename=invoice_{invoice.invoice_number}.pdf"
-        }
-    )
-
-
-@router.get("/quotations/{quotation_id}/pdf")
-def download_quotation_pdf(
-    quotation_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Download quotation as PDF with organisation branding."""
-    from fastapi.responses import StreamingResponse
-    from io import BytesIO
-    from app.utils.pdf import generate_quotation_pdf, REPORTLAB_AVAILABLE
-
-    if not REPORTLAB_AVAILABLE:
-        raise HTTPException(
-            status_code=501,
-            detail="PDF generation not available. install reportlab."
-        )
-
-    organisation = get_user_org(db, current_user)
-    if not organisation:
-        raise HTTPException(status_code=403, detail="No organisation found")
-
-    # Get quotation
-    quotation = db.query(models.Quotation).filter(
-        models.Quotation.id == quotation_id,
-        models.Quotation.organisation_id == organisation.id
-    ).first()
-    if not quotation:
-        raise HTTPException(status_code=404, detail="Quotation not found")
-
-    # Prepare data
-    quotation_data = {
-        "quotation_number": quotation.quotation_number,
-        "created_at": quotation.created_at.isoformat() if quotation.created_at else "",
-        "valid_until": quotation.valid_until.isoformat() if quotation.valid_until else "",
-        "customer_name": quotation.customer_name,
-        "base_price": quotation.base_price,
-        "floor_premium": quotation.floor_premium,
-        "plc": quotation.plc,
-        "parking": quotation.parking,
-        "club_membership": quotation.club_membership,
-        "gst_amount": quotation.gst_amount,
-        "stamp_duty": quotation.stamp_duty,
-        "registration": quotation.registration,
-        "total": quotation.total,
-        "terms_conditions": quotation.terms_conditions,
-    }
-
-    org_data = {
-        "name": organisation.name,
-        "logo": organisation.logo,
-        "address": organisation.address,
-    }
-
-    # Generate PDF
-    pdf_content = generate_quotation_pdf(quotation_data, org_data)
-
-    return StreamingResponse(
-        BytesIO(pdf_content),
-        media_type="application/pdf",
-        headers={
-            "Content-Disposition": f"attachment; filename=quotation_{quotation.quotation_number}.pdf"
-        }
-    )

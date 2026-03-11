@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { api } from "@/services/api"
@@ -72,11 +71,13 @@ export default function NotificationsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-8">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Notifications</h1>
-          <p className="text-gray-500 mt-1">
+          <h1 className="text-4xl md:text-5xl font-light text-zinc-900 leading-tight">
+            Your <span className="font-semibold">Notifications</span>
+          </h1>
+          <p className="text-zinc-500 mt-2">
             {unreadData?.count || 0} unread notifications
           </p>
         </div>
@@ -84,14 +85,15 @@ export default function NotificationsPage() {
           variant="outline"
           onClick={() => markAllReadMutation.mutate()}
           disabled={markAllReadMutation.isPending}
+          className="rounded-full border-zinc-300 hover:bg-zinc-100"
         >
           <CheckCheck className="mr-2 h-4 w-4" />
           Mark all as read
         </Button>
       </div>
 
-      <Card>
-        <CardContent className="p-0">
+      <div className="bg-white rounded-3xl border border-zinc-200 overflow-hidden">
+        <div className="p-0">
           {isLoading ? (
             <div className="text-center py-10">Loading...</div>
           ) : (
@@ -99,7 +101,7 @@ export default function NotificationsPage() {
               {data?.data?.map((notification: Notification) => (
                 <div
                   key={notification.id}
-                  className={`p-4 flex items-start gap-4 hover:bg-gray-50 ${
+                  className={`p-4 flex items-start gap-4 hover:bg-zinc-50 ${
                     !notification.is_read ? "bg-blue-50" : ""
                   }`}
                 >
@@ -112,9 +114,9 @@ export default function NotificationsPage() {
                       )}
                     </div>
                     {notification.message && (
-                      <p className="text-sm text-gray-500 mt-1">{notification.message}</p>
+                      <p className="text-sm text-zinc-500 mt-1">{notification.message}</p>
                     )}
-                    <p className="text-xs text-gray-400 mt-2">
+                    <p className="text-xs text-zinc-400 mt-2">
                       {new Date(notification.created_at).toLocaleString()}
                     </p>
                   </div>
@@ -139,14 +141,14 @@ export default function NotificationsPage() {
                 </div>
               ))}
               {data?.data?.length === 0 && (
-                <div className="text-center py-10 text-gray-500">
+                <div className="text-center py-10 text-zinc-500">
                   No notifications
                 </div>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </div>
   )
 }

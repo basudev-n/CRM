@@ -221,6 +221,7 @@ def get_kanban_board(
 def move_lead_stage(
     lead_id: int,
     new_status: str,
+    lost_reason: str = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -237,8 +238,17 @@ def move_lead_stage(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
+    # Check if moving to lost stage - require lost_reason
+    new_status_lower = new_status.lower().strip("/")
+    if "lost" in new_status_lower and not lost_reason:
+        raise HTTPException(status_code=400, detail="Lost reason is required when marking lead as lost")
+
     old_status = lead.status
-    lead.status = new_status
+    lead.status = new_status.strip("/")  # Strip any trailing slashes
+
+    # Set lost reason if moving to lost
+    if lost_reason:
+        lead.lost_reason = lost_reason
 
     # Create activity log
     activity = models.Activity(
@@ -247,12 +257,24 @@ def move_lead_stage(
         user_id=current_user.id,
         activity_type="status_change",
         title=f"Lead moved from {old_status} to {new_status}",
-        description=f"Status changed from {old_status} to {new_status}"
+        description=f"Status changed from {old_status} to {new_status}" + (f". Reason: {lost_reason}" if lost_reason else "")
     )
     db.add(activity)
 
-    # Recalculate score
-    lead.score = calculate_lead_score(lead)
+    # Recalculate score using the leads router function
+    from app.leads.router import calculate_lead_score
+    lead.score = calculate_lead_score(lead, db)
+
+    # Create notification if assignee is different
+    if lead.assigned_to and lead.assigned_to != current_user.id:
+        notification = models.Notification(
+            user_id=lead.assigned_to,
+            organisation_id=organisation.id,
+            title=f"Lead '{lead.name}' moved to {new_status}",
+            message=f"{current_user.first_name} moved lead '{lead.name}' from {old_status} to {new_status}",
+            link=f"/pipeline"
+        )
+        db.add(notification)
 
     db.commit()
     db.refresh(lead)

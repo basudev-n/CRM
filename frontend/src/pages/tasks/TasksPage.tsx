@@ -1,10 +1,11 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { DatePicker, TimePicker } from "@/components/ui/date-picker"
 import {
   Select,
   SelectContent,
@@ -12,7 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { api } from "@/services/api"
+import { api, leadsApi, usersApi } from "@/services/api"
 import { useToast } from "@/components/ui/use-toast"
 import { CheckCircle, Circle, Clock, AlertCircle, Plus, Calendar } from "lucide-react"
 
@@ -42,11 +43,30 @@ export default function TasksPage() {
     description: "",
     task_type: "follow_up",
     priority: "medium",
+    lead_id: "",
     assignee_id: "",
     due_date: "",
   })
   const queryClient = useQueryClient()
   const { toast } = useToast()
+
+  const { data: leadsData } = useQuery({
+    queryKey: ["leads-for-tasks"],
+    queryFn: () => leadsApi.list({ per_page: 200 }).then((res) => res.data),
+    staleTime: 1000 * 60 * 5,
+  })
+
+  const { data: assigneesData } = useQuery({
+    queryKey: ["org-users-for-tasks"],
+    queryFn: () => usersApi.getOrgUsers().then((res) => res.data),
+    staleTime: 1000 * 60 * 5,
+  })
+
+  const { data: overview } = useQuery({
+    queryKey: ["tasks-overview"],
+    queryFn: () => api.get("/tasks/overview").then((res) => res.data),
+    staleTime: 1000 * 60 * 5,
+  })
 
   const { data, isLoading } = useQuery({
     queryKey: ["tasks", filter],
@@ -61,6 +81,14 @@ export default function TasksPage() {
     },
   })
 
+  const leadLookup = useMemo(() => {
+    const map = new Map<number, any>()
+    leadsData?.data?.forEach((lead: any) => {
+      if (lead.id) map.set(lead.id, lead)
+    })
+    return map
+  }, [leadsData])
+
   const createMutation = useMutation({
     mutationFn: (data: any) => api.post("/tasks", data),
     onSuccess: () => {
@@ -71,13 +99,15 @@ export default function TasksPage() {
         description: "",
         task_type: "follow_up",
         priority: "medium",
+        lead_id: "",
         assignee_id: "",
         due_date: "",
       })
       toast({ title: "Task created successfully" })
     },
-    onError: () => {
-      toast({ variant: "destructive", title: "Failed to create task" })
+    onError: (error: any) => {
+      const message = error?.response?.data?.detail || "Failed to create task"
+      toast({ variant: "destructive", title: message })
     },
   })
 
@@ -92,10 +122,15 @@ export default function TasksPage() {
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault()
-    createMutation.mutate({
+    const data: any = {
       ...formData,
       assignee_id: parseInt(formData.assignee_id),
-    })
+      lead_id: formData.lead_id ? parseInt(formData.lead_id) : undefined,
+    }
+    if (!formData.due_date) {
+      delete data.due_date
+    }
+    createMutation.mutate(data)
   }
 
   const handleStatusChange = (taskId: number, newStatus: string) => {
@@ -123,21 +158,54 @@ export default function TasksPage() {
       case "in_progress":
         return <Clock className="h-5 w-5 text-blue-500" />
       default:
-        return <Circle className="h-5 w-5 text-gray-400" />
+        return <Circle className="h-5 w-5 text-zinc-400" />
     }
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-8">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Tasks</h1>
-          <p className="text-gray-500 mt-1">Manage your tasks and follow-ups</p>
+          <h1 className="text-4xl md:text-5xl font-light text-zinc-900 leading-tight">
+            Your <span className="font-semibold">Tasks</span>
+          </h1>
+          <p className="text-zinc-500 mt-2">Manage your tasks and follow-ups</p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>
+        <Button onClick={() => setShowCreateModal(true)} className="rounded-full bg-zinc-900 hover:bg-zinc-800 text-white">
           <Plus className="mr-2 h-4 w-4" />
           New Task
         </Button>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-4">
+        {[
+          {
+            title: "Total Tasks",
+            value: overview?.total ?? 0,
+            helper: "All assigned tasks",
+          },
+          {
+            title: "Completed",
+            value: overview?.completed ?? 0,
+            helper: "Finished this org",
+          },
+          {
+            title: "Pending",
+            value: overview?.pending ?? 0,
+            helper: "Awaiting action",
+          },
+          {
+            title: "Today",
+            value: overview?.today ?? 0,
+            helper: "Due today",
+          },
+        ].map((stat) => (
+          <div key={stat.title} className="bg-white rounded-3xl p-5 border border-zinc-200">
+            <p className="text-xs uppercase tracking-wider text-zinc-400 mb-1">{stat.title}</p>
+            <p className="text-3xl font-bold text-zinc-900">{stat.value}</p>
+            <p className="text-xs text-zinc-400 mt-1">{stat.helper}</p>
+          </div>
+        ))}
       </div>
 
       {/* Filters */}
@@ -169,8 +237,8 @@ export default function TasksPage() {
       </div>
 
       {/* Tasks List */}
-      <Card>
-        <CardContent className="p-0">
+      <div className="bg-white rounded-3xl border border-zinc-200 overflow-hidden">
+        <div className="p-0">
           {isLoading ? (
             <div className="text-center py-10">Loading...</div>
           ) : (
@@ -178,8 +246,9 @@ export default function TasksPage() {
               {data?.data?.map((task: Task) => {
                 const isOverdue =
                   task.due_date && new Date(task.due_date) < new Date() && task.status !== "completed"
+                const lead = leadLookup.get(task.lead_id)
                 return (
-                  <div key={task.id} className="p-4 flex items-start gap-4 hover:bg-gray-50">
+                  <div key={task.id} className="p-4 flex items-start gap-4 hover:bg-zinc-50">
                     <button
                       onClick={() =>
                         handleStatusChange(
@@ -192,21 +261,29 @@ export default function TasksPage() {
                       {getStatusIcon(task.status)}
                     </button>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <p
                           className={`font-medium ${
-                            task.status === "completed" ? "line-through text-gray-400" : ""
+                            task.status === "completed" ? "line-through text-zinc-400" : ""
                           }`}
                         >
                           {task.title}
                         </p>
                         <Badge variant={getPriorityColor(task.priority)}>{task.priority}</Badge>
                         <Badge variant="outline">{task.task_type}</Badge>
+                        <Badge variant="outline" className="capitalize tracking-[0.2em]">
+                          {task.status}
+                        </Badge>
                       </div>
-                      {task.description && (
-                        <p className="text-sm text-gray-500 mt-1">{task.description}</p>
+                      {lead && (
+                        <p className="text-sm text-zinc-500">
+                          Lead: {lead.name} {lead.phone ? `(${lead.phone})` : ""}
+                        </p>
                       )}
-                      <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                      {task.description && (
+                        <p className="text-sm text-zinc-500 mt-1">{task.description}</p>
+                      )}
+                      <div className="flex items-center gap-4 mt-2 text-sm text-zinc-500">
                         {task.assignee && (
                           <span>
                             Assigned to: {task.assignee.first_name} {task.assignee.last_name}
@@ -215,7 +292,8 @@ export default function TasksPage() {
                         {task.due_date && (
                           <span className={`flex items-center gap-1 ${isOverdue ? "text-red-500" : ""}`}>
                             <Calendar className="h-4 w-4" />
-                            {new Date(task.due_date).toLocaleDateString()}
+                            {new Date(task.due_date).toLocaleDateString()}{" "}
+                            {new Date(task.due_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             {isOverdue && <AlertCircle className="h-4 w-4" />}
                           </span>
                         )}
@@ -225,12 +303,12 @@ export default function TasksPage() {
                 )
               })}
               {data?.data?.length === 0 && (
-                <div className="text-center py-10 text-gray-500">No tasks found</div>
+                <div className="text-center py-10 text-zinc-500">No tasks found</div>
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Create Modal */}
       {showCreateModal && (
@@ -258,6 +336,21 @@ export default function TasksPage() {
                     value={formData.description}
                     onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lead">Link Lead</Label>
+                  <Select value={formData.lead_id} onValueChange={(value) => setFormData({ ...formData, lead_id: value })}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Optional lead" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {leadsData?.data?.map((lead: any) => (
+                        <SelectItem key={lead.id} value={String(lead.id)}>
+                          {lead.name} {lead.phone ? `(${lead.phone})` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-2">
@@ -299,23 +392,40 @@ export default function TasksPage() {
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="assignee">Assign To *</Label>
-                  <Input
-                    id="assignee"
-                    type="number"
-                    placeholder="User ID"
+                  <Select
                     value={formData.assignee_id}
-                    onChange={(e) => setFormData({ ...formData, assignee_id: e.target.value })}
-                    required
-                  />
+                    onValueChange={(value) => setFormData({ ...formData, assignee_id: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Choose assignee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {assigneesData?.map((user: any) => (
+                        <SelectItem key={user.id} value={String(user.id)}>
+                          {user.first_name} {user.last_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="due_date">Due Date</Label>
-                  <Input
-                    id="due_date"
-                    type="datetime-local"
-                    value={formData.due_date}
-                    onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <DatePicker
+                      value={formData.due_date ? formData.due_date.split("T")[0] : ""}
+                      onChange={(date) => {
+                        const currentTime = formData.due_date?.split("T")[1]?.slice(0, 5) || "10:00"
+                        setFormData({ ...formData, due_date: `${date}T${currentTime}` })
+                      }}
+                    />
+                    <TimePicker
+                      value={formData.due_date?.split("T")[1]?.slice(0, 5) || ""}
+                      onChange={(time) => {
+                        const currentDate = formData.due_date?.split("T")[0] || new Date().toISOString().split("T")[0]
+                        setFormData({ ...formData, due_date: `${currentDate}T${time}:00` })
+                      }}
+                    />
+                  </div>
                 </div>
                 <div className="flex justify-end gap-2">
                   <Button type="button" variant="outline" onClick={() => setShowCreateModal(false)}>

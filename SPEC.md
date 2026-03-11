@@ -487,33 +487,36 @@ All endpoints:
 
 ### Phase 1 — Foundation (Week 1-2)
 **Goal: Working auth + org setup + basic lead management**
-- [ ] Project scaffold (FastAPI + React + PostgreSQL)
-- [ ] Auth: signup, login, JWT, refresh
-- [ ] Organisation create + onboarding flow
-- [ ] User invite + RBAC middleware
-- [ ] Basic contacts CRUD
-- [ ] Basic leads CRUD
-- [ ] Lead list + detail view
-- [ ] Simple dashboard skeleton
+- [x] Project scaffold (FastAPI + React + PostgreSQL)
+- [x] Auth: signup, login, JWT, refresh
+- [x] Organisation create + onboarding flow
+- [x] User invite + RBAC middleware
+- [x] Basic contacts CRUD
+- [x] Basic leads CRUD
+- [x] Lead list + detail view
+- [x] Simple dashboard skeleton
+> **Status:** Backend auth/pipeline scaffolding, organisation onboarding, and basic CRM UI are running; frontend pages for login/signup/onboarding and the dashboard skeleton are wired to the FastAPI API routes.
 
 ### Phase 2 — CRM Core (Week 3-4)
 **Goal: Full pipeline + tasks**
-- [ ] Pipeline kanban board (drag-and-drop)
-- [ ] Lead scoring
-- [ ] Activity timeline
-- [ ] Task management
-- [ ] Site visit scheduling
-- [ ] Notes + @mentions
-- [ ] Basic notifications
+- [x] Pipeline kanban board (drag-and-drop)
+- [x] Lead scoring
+- [x] Activity timeline
+- [x] Task management
+- [x] Site visit scheduling
+- [x] Notes + @mentions
+- [x] Basic notifications
+> **Status:** Pipeline, scoring, activity timeline, task management, and site visit scheduling are live with full Create/filters/status updates and slot-aware scheduling; notifications and notes are also in place.
 
 ### Phase 3 — Projects & Inventory (Week 5-6)
 **Goal: Full inventory management**
-- [ ] Project CRUD + media upload
-- [ ] Tower/Floor/Unit structure
-- [ ] Inventory grid view (color-coded)
-- [ ] Unit hold/book/sell flow
+- [x] Project CRUD + media upload (basic form + details UI)
+- [x] Tower/Floor/Unit structure with tower snapshot and flat availability
+- [x] Inventory grid view (status badges, filters, search)
+- [x] Unit hold/book/sell flow (status changer in UI)
 - [ ] Unit bulk upload (Excel)
 - [ ] Price list generator
+> **Status:** Project management, tower/flat CRUD, auto-generate flats, and the availability dashboard are live; bulk uploads and price-list exports remain for later.
 
 ### Phase 4 — Finance (Week 7-8)
 **Goal: Quotation to payment**
@@ -523,6 +526,7 @@ All endpoints:
 - [ ] Payment recording + schedule
 - [ ] Finance dashboard
 - [ ] Overdue alerts
+> **Status:** Finance module pending—quotations, invoices, and cost sheet flows are planned once backend APIs are available.
 
 ### Phase 5 — Integrations (Week 9-10)
 **Goal: Portal connections + communication**
@@ -532,17 +536,28 @@ All endpoints:
 - [ ] Email integration (Gmail/Outlook)
 - [ ] WhatsApp via WATI
 - [ ] Portal performance dashboard
+> **Status:** Phase 5 deferred per current roadmap; focus remains on CRM polish and finance before portal integrations.
 
 ### Phase 6 — Analytics & Polish (Week 11-12)
 **Goal: Reports + enterprise readiness**
 - [ ] Custom report builder
-- [ ] Advanced analytics charts
+- [x] Advanced analytics charts
 - [ ] Audit logs
 - [ ] Bulk operations (import/export)
-- [ ] Mobile responsive polish
+- [x] Mobile responsive polish
 - [ ] Performance optimization
 - [ ] API documentation
 - [ ] Billing integration (Razorpay/Stripe)
+> **Status:** Dashboard hero now includes analytics widgets, sparkline, pipeline distribution, and responsive spacing improvements; audit logs and billing still on the roadmap.
+
+### Current Integration Snapshot
+- **Authentication & Tenancy:** Email signup/login, organisation creation, RBAC checks, and multi-tenant-aware API routing are wired end-to-end (phase 1).  
+- **Leads & Pipeline:** Kanban drag-drop, stage distribution, lead scoring, timeline, notes, aging modal, and basic notifications are available in the UI, backed by FastAPI endpoints (`pipeline/kanban`, `pipeline/leads/{id}/stage`, `dashboard/stats`).  
+- **Projects & Inventory:** Project details page, tower picker, flat availability grid, auto-flat generator, and per-unit status editor are live; the API currently exposes tower/unit CRUD and status update routes.  
+- **Dashboard & Analytics:** Owner dashboard renders stats, sparkline, stage bars, and pipeline pulse cards, plus spacing + hover polish for hero actions. Mobile responsiveness and UI improvements across dashboard/leads cards are delivered.  
+- **Reporting & Audit:** Advanced analytics widgets (sparkline, stage bars) are live, but the custom report builder and audit log capture remain on the backlog.  
+- **Finance & Billing:** Still pending—the cost sheet builder, quotations, invoices, payment schedules, and PDF exports await backend completion.  
+- **Integrations & Automation:** Portal integrations, WhatsApp, email, and automated lead capture flows are postponed until core CRM/finance flows stabilize.  
 
 ---
 

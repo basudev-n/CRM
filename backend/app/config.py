@@ -19,9 +19,17 @@ class Settings(BaseSettings):
     RESEND_API_KEY: Optional[str] = None
     FROM_EMAIL: str = "noreply@propflow.in"
 
+    # Google OAuth
+    GOOGLE_CLIENT_ID: Optional[str] = None
+    GOOGLE_CLIENT_SECRET: Optional[str] = None
+
+    # CORS
+    CORS_ORIGINS: str = "http://localhost:5173,http://localhost:5174,http://localhost:3000"
+
     # App
     APP_NAME: str = "PropFlow"
     DEBUG: bool = True
+    FRONTEND_BASE_URL: str = "http://localhost:5173"
 
     class Config:
         env_file = ".env"

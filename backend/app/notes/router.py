@@ -85,7 +85,7 @@ def create_note(
             organisation_id=organisation.id,
             lead_id=request.lead_id,
             user_id=current_user.id,
-            activity_type=models.ActivityType.NOTE,
+            activity_type="note",
             title="Note added",
             description=request.content[:100]
         )
@@ -96,7 +96,7 @@ def create_note(
         notification = models.Notification(
             user_id=user_id,
             organisation_id=organisation.id,
-            notification_type=models.NotificationType.MENTION,
+            notification_type="mention",
             title="You were mentioned in a note",
             message=f"{current_user.first_name} mentioned you in a note",
             link=f"/leads/{request.lead_id}" if request.lead_id else None

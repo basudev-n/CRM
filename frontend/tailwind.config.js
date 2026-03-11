@@ -7,6 +7,11 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Brand colors
+        cream: "#F7F5F2",
+        "brand-dark": "#18181b",
+        "brand-dark-card": "#27272a",
+        // shadcn/ui colors
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
@@ -48,5 +53,5 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [require("tailwindcss-animate")],
 }

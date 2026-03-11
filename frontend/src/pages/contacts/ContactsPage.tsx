@@ -11,15 +11,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { contactsApi } from "@/services/api"
+import { contactsApi, activitiesApi } from "@/services/api"
 import { useToast } from "@/components/ui/use-toast"
-import { Plus, Search, MoreVertical } from "lucide-react"
+import { Plus, Search, MoreVertical, X, Upload, Merge, Clock, Mail, Phone, User, FileText } from "lucide-react"
 
 export default function ContactsPage() {
   const [page, setPage] = useState(1)
   const [search, setSearch] = useState("")
   const [contactType, setContactType] = useState("")
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showMergeModal, setShowMergeModal] = useState(false)
+  const [showImportModal, setShowImportModal] = useState(false)
+  const [selectedContact, setSelectedContact] = useState<any>(null)
+  const [mergeSourceId, setMergeSourceId] = useState("")
+  const [mergeTargetId, setMergeTargetId] = useState("")
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -36,6 +41,14 @@ export default function ContactsPage() {
         .then((res) => res.data),
   })
 
+  // Timeline query
+  const { data: timelineData } = useQuery({
+    queryKey: ["contactTimeline", selectedContact?.id],
+    queryFn: () =>
+      selectedContact?.id ? contactsApi.getTimeline(selectedContact.id).then(res => res.data) : null,
+    enabled: !!selectedContact?.id,
+  })
+
   const createMutation = useMutation({
     mutationFn: (data: any) => contactsApi.create(data),
     onSuccess: () => {
@@ -48,32 +61,106 @@ export default function ContactsPage() {
     },
   })
 
+  const mergeMutation = useMutation({
+    mutationFn: ({ sourceId, targetId }: { sourceId: number; targetId: number }) =>
+      contactsApi.merge(sourceId, targetId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["contacts"] })
+      setShowMergeModal(false)
+      setMergeSourceId("")
+      setMergeTargetId("")
+      toast({ title: "Contacts merged successfully" })
+    },
+    onError: (error: any) => {
+      toast({ variant: "destructive", title: "Failed to merge contacts", description: error.response?.data?.detail })
+    },
+  })
+
+  const importMutation = useMutation({
+    mutationFn: (formData: FormData) => contactsApi.importCsv(formData),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["contacts"] })
+      setShowImportModal(false)
+      toast({ title: `Imported ${data.data?.imported || 0} contacts` })
+    },
+    onError: () => {
+      toast({ variant: "destructive", title: "Failed to import contacts" })
+    },
+  })
+
   const handleCreateContact = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     const formData = new FormData(e.currentTarget)
     createMutation.mutate(Object.fromEntries(formData))
   }
 
+  const handleMerge = () => {
+    if (!mergeSourceId || !mergeTargetId) {
+      toast({ variant: "destructive", title: "Please select both contacts" })
+      return
+    }
+    if (mergeSourceId === mergeTargetId) {
+      toast({ variant: "destructive", title: "Please select different contacts" })
+      return
+    }
+    mergeMutation.mutate({ sourceId: Number(mergeSourceId), targetId: Number(mergeTargetId) })
+  }
+
+  const handleImport = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const formData = new FormData(e.currentTarget)
+    const file = formData.get("file") as File
+    if (!file || file.size === 0) {
+      toast({ variant: "destructive", title: "Please select a file" })
+      return
+    }
+    const data = new FormData()
+    data.append("file", file)
+    importMutation.mutate(data)
+  }
+
+  const getActivityIcon = (type: string) => {
+    switch (type) {
+      case "email": return <Mail className="h-4 w-4" />
+      case "call": return <Phone className="h-4 w-4" />
+      case "note": return <FileText className="h-4 w-4" />
+      case "meeting": return <User className="h-4 w-4" />
+      default: return <Clock className="h-4 w-4" />
+    }
+  }
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="space-y-8">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Contacts</h1>
-          <p className="text-gray-500 mt-1">Manage your contacts and prospects</p>
+          <h1 className="text-4xl md:text-5xl font-light text-zinc-900 leading-tight">
+            Your <span className="font-semibold">Contacts</span>
+          </h1>
+          <p className="text-zinc-500 mt-2">Manage your contacts and prospects</p>
         </div>
-        <Button onClick={() => setShowCreateModal(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          New Contact
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setShowImportModal(true)} className="rounded-full border-zinc-300 hover:bg-zinc-100">
+            <Upload className="mr-2 h-4 w-4" />
+            Import CSV
+          </Button>
+          <Button variant="outline" onClick={() => setShowMergeModal(true)} className="rounded-full border-zinc-300 hover:bg-zinc-100">
+            <Merge className="mr-2 h-4 w-4" />
+            Merge
+          </Button>
+          <Button onClick={() => setShowCreateModal(true)} className="rounded-full bg-zinc-900 hover:bg-zinc-800 text-white">
+            <Plus className="mr-2 h-4 w-4" />
+            New Contact
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
-      <Card>
-        <CardContent className="p-4">
+      <div className="bg-white rounded-3xl border border-zinc-200 overflow-hidden">
+        <div className="p-4">
           <div className="flex flex-wrap gap-4">
             <div className="flex-1 min-w-[200px]">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
                 <Input
                   placeholder="Search contacts..."
                   className="pl-9"
@@ -82,10 +169,7 @@ export default function ContactsPage() {
                 />
               </div>
             </div>
-            <Select
-              value={contactType}
-              onValueChange={setContactType}
-            >
+            <Select value={contactType} onValueChange={setContactType}>
               <SelectTrigger className="w-[150px]">
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
@@ -98,30 +182,30 @@ export default function ContactsPage() {
               </SelectContent>
             </Select>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Contacts Table */}
-      <Card>
-        <CardContent className="p-0">
+      <div className="bg-white rounded-3xl border border-zinc-200 overflow-hidden">
+        <div className="p-0">
           {isLoading ? (
             <div className="text-center py-10">Loading...</div>
           ) : (
             <>
               <table className="w-full">
-                <thead className="border-b bg-gray-50">
+                <thead className="border-b bg-zinc-50">
                   <tr>
-                    <th className="text-left p-4 font-medium text-gray-600">Name</th>
-                    <th className="text-left p-4 font-medium text-gray-600">Email</th>
-                    <th className="text-left p-4 font-medium text-gray-600">Phone</th>
-                    <th className="text-left p-4 font-medium text-gray-600">Type</th>
-                    <th className="text-left p-4 font-medium text-gray-600">Created</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Name</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Email</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Phone</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Type</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Created</th>
                     <th className="p-4"></th>
                   </tr>
                 </thead>
                 <tbody>
                   {data?.data?.map((contact: any) => (
-                    <tr key={contact.id} className="border-b hover:bg-gray-50">
+                    <tr key={contact.id} className="border-b hover:bg-zinc-50">
                       <td className="p-4">
                         <div className="font-medium">
                           {contact.first_name} {contact.last_name}
@@ -134,11 +218,11 @@ export default function ContactsPage() {
                           {contact.contact_type}
                         </span>
                       </td>
-                      <td className="p-4 text-sm text-gray-500">
+                      <td className="p-4 text-sm text-zinc-500">
                         {new Date(contact.created_at).toLocaleDateString()}
                       </td>
                       <td className="p-4">
-                        <Button variant="ghost" size="icon">
+                        <Button variant="ghost" size="icon" onClick={() => setSelectedContact(contact)}>
                           <MoreVertical className="h-4 w-4" />
                         </Button>
                       </td>
@@ -147,33 +231,60 @@ export default function ContactsPage() {
                 </tbody>
               </table>
               {data?.data?.length === 0 && (
-                <div className="text-center py-10 text-gray-500">No contacts found</div>
+                <div className="text-center py-10 text-zinc-500">No contacts found</div>
               )}
             </>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Pagination */}
       {data?.meta?.pages > 1 && (
         <div className="flex justify-center gap-2">
-          <Button
-            variant="outline"
-            disabled={page === 1}
-            onClick={() => setPage(page - 1)}
-          >
+          <Button variant="outline" disabled={page === 1} onClick={() => setPage(page - 1)}>
             Previous
           </Button>
           <span className="flex items-center px-4 text-sm">
             Page {page} of {data.meta.pages}
           </span>
-          <Button
-            variant="outline"
-            disabled={page >= data.meta.pages}
-            onClick={() => setPage(page + 1)}
-          >
+          <Button variant="outline" disabled={page >= data.meta.pages} onClick={() => setPage(page + 1)}>
             Next
           </Button>
+        </div>
+      )}
+
+      {/* Timeline Sidebar */}
+      {selectedContact && (
+        <div className="fixed inset-y-0 right-0 w-96 bg-white shadow-xl z-50 overflow-y-auto">
+          <div className="p-4 border-b flex justify-between items-center">
+            <h3 className="font-semibold">{selectedContact.first_name} {selectedContact.last_name}</h3>
+            <Button variant="ghost" size="icon" onClick={() => setSelectedContact(null)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </div>
+          <div className="p-4">
+            <h4 className="font-medium text-sm text-zinc-500 mb-4">Activity Timeline</h4>
+            <div className="space-y-4">
+              {timelineData?.data?.length > 0 ? (
+                timelineData.data.map((activity: any) => (
+                  <div key={activity.id} className="flex gap-3">
+                    <div className="w-8 h-8 rounded-full bg-zinc-100 flex items-center justify-center flex-shrink-0">
+                      {getActivityIcon(activity.activity_type)}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium">{activity.title}</p>
+                      <p className="text-xs text-zinc-500">{activity.description}</p>
+                      <p className="text-xs text-zinc-400 mt-1">
+                        {new Date(activity.created_at).toLocaleString()}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-zinc-500 text-center py-4">No activity yet</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -230,15 +341,91 @@ export default function ContactsPage() {
                   />
                 </div>
                 <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setShowCreateModal(false)}
-                  >
+                  <Button type="button" variant="outline" onClick={() => setShowCreateModal(false)}>
                     Cancel
                   </Button>
                   <Button type="submit" disabled={createMutation.isPending}>
                     {createMutation.isPending ? "Creating..." : "Create Contact"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Merge Modal */}
+      {showMergeModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Merge Contacts</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm text-zinc-500">
+                Select two contacts to merge. The second contact will be merged into the first one.
+              </p>
+              <div className="space-y-2">
+                <Label>Source Contact (will be removed)</Label>
+                <Select value={mergeSourceId} onValueChange={setMergeSourceId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select contact" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {data?.data?.map((c: any) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.first_name} {c.last_name} ({c.email})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Target Contact (will remain)</Label>
+                <Select value={mergeTargetId} onValueChange={setMergeTargetId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select contact" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {data?.data?.map((c: any) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.first_name} {c.last_name} ({c.email})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowMergeModal(false)}>Cancel</Button>
+                <Button onClick={handleMerge} disabled={mergeMutation.isPending}>
+                  {mergeMutation.isPending ? "Merging..." : "Merge Contacts"}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Import Modal */}
+      {showImportModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle>Import Contacts</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleImport} className="space-y-4">
+                <div className="space-y-2">
+                  <Label>CSV File</Label>
+                  <Input type="file" name="file" accept=".csv" />
+                </div>
+                <p className="text-xs text-zinc-500">
+                  Upload a CSV file with columns: first_name, last_name, email, phone, address
+                </p>
+                <div className="flex justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => setShowImportModal(false)}>Cancel</Button>
+                  <Button type="submit" disabled={importMutation.isPending}>
+                    {importMutation.isPending ? "Importing..." : "Import"}
                   </Button>
                 </div>
               </form>

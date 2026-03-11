@@ -18,6 +18,29 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Define column types with sqlite fallback
+    engine = op.get_bind()
+    if engine.dialect.name == 'sqlite':
+        activity_type_col = sa.String(length=50)
+        task_type_col = sa.String(length=50)
+        task_priority_col = sa.String(length=20)
+        task_status_col = sa.String(length=20)
+        notification_type_col = sa.String(length=50)
+    else:
+        # Create enum types first
+        for ename, evalues in [
+            ('activitytype', ('call', 'email', 'whatsapp', 'note', 'status_change', 'assignment', 'site_visit', 'task_completed', 'quotation', 'meeting')),
+            ('tasktype', ('follow_up', 'call', 'email', 'send_document', 'internal', 'approval', 'other')),
+            ('taskpriority', ('high', 'medium', 'low')),
+            ('taskstatus', ('pending', 'in_progress', 'completed', 'cancelled')),
+            ('notificationtype', ('task_assigned', 'task_due', 'task_completed', 'lead_assigned', 'lead_status_changed', 'site_visit_scheduled', 'site_visit_reminder', 'mention', 'lead_inactive')),
+        ]:
+            sa.Enum(*evalues, name=ename).create(op.get_bind(), checkfirst=True)
+        activity_type_col = sa.Enum('call', 'email', 'whatsapp', 'note', 'status_change', 'assignment', 'site_visit', 'task_completed', 'quotation', 'meeting', name='activitytype', create_type=False)
+        task_type_col = sa.Enum('follow_up', 'call', 'email', 'send_document', 'internal', 'approval', 'other', name='tasktype', create_type=False)
+        task_priority_col = sa.Enum('high', 'medium', 'low', name='taskpriority', create_type=False)
+        task_status_col = sa.Enum('pending', 'in_progress', 'completed', 'cancelled', name='taskstatus', create_type=False)
+        notification_type_col = sa.Enum('task_assigned', 'task_due', 'task_completed', 'lead_assigned', 'lead_status_changed', 'site_visit_scheduled', 'site_visit_reminder', 'mention', 'lead_inactive', name='notificationtype', create_type=False)
     # Create pipeline_stages table
     op.create_table(
         'pipeline_stages',
@@ -29,7 +52,7 @@ def upgrade() -> None:
         sa.Column('is_default', sa.Boolean(), nullable=True),
         sa.Column('is_won', sa.Boolean(), nullable=True),
         sa.Column('is_lost', sa.Boolean(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
@@ -43,11 +66,11 @@ def upgrade() -> None:
         sa.Column('lead_id', sa.Integer(), nullable=True),
         sa.Column('contact_id', sa.Integer(), nullable=True),
         sa.Column('user_id', sa.Integer(), nullable=False),
-        sa.Column('activity_type', sa.Enum('call', 'email', 'whatsapp', 'note', 'status_change', 'assignment', 'site_visit', 'task_completed', 'quotation', 'meeting', name='activitytype'), nullable=False),
+        sa.Column('activity_type', activity_type_col, nullable=False),
         sa.Column('title', sa.String(length=255), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('metadata', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.ForeignKeyConstraint(['lead_id'], ['leads.id'], ),
         sa.ForeignKeyConstraint(['contact_id'], ['contacts.id'], ),
@@ -67,13 +90,13 @@ def upgrade() -> None:
         sa.Column('created_by_id', sa.Integer(), nullable=False),
         sa.Column('title', sa.String(length=255), nullable=False),
         sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('task_type', sa.Enum('follow_up', 'call', 'email', 'send_document', 'internal', 'approval', 'other', name='tasktype'), nullable=True),
-        sa.Column('priority', sa.Enum('high', 'medium', 'low', name='taskpriority'), nullable=True),
-        sa.Column('status', sa.Enum('pending', 'in_progress', 'completed', 'cancelled', name='taskstatus'), nullable=True),
+        sa.Column('task_type', task_type_col, nullable=True),
+        sa.Column('priority', task_priority_col, nullable=True),
+        sa.Column('status', task_status_col, nullable=True),
         sa.Column('due_date', sa.DateTime(timezone=True), nullable=True),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('completion_notes', sa.Text(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.ForeignKeyConstraint(['lead_id'], ['leads.id'], ),
@@ -83,6 +106,20 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_tasks_id'), 'tasks', ['id'], unique=False)
+
+    # Create email_otps table (for OTP storage)
+    op.create_table(
+        'email_otps',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('email', sa.String(length=255), nullable=False, index=True),
+        sa.Column('otp', sa.String(length=6), nullable=False),
+        sa.Column('purpose', sa.String(length=50), nullable=True, server_default='signup'),
+        sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('is_verified', sa.Boolean(), nullable=True, server_default=sa.text('0')),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+        sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_email_otps_id'), 'email_otps', ['id'], unique=False)
 
     # Create site_visits table
     op.create_table(
@@ -99,7 +136,7 @@ def upgrade() -> None:
         sa.Column('outcome', sa.String(length=50), nullable=True),
         sa.Column('feedback', sa.Text(), nullable=True),
         sa.Column('completed_at', sa.DateTime(timezone=True), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.ForeignKeyConstraint(['lead_id'], ['leads.id'], ),
@@ -120,7 +157,7 @@ def upgrade() -> None:
         sa.Column('content', sa.Text(), nullable=False),
         sa.Column('is_pinned', sa.Boolean(), nullable=True),
         sa.Column('mentions', sa.String(length=500), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.ForeignKeyConstraint(['lead_id'], ['leads.id'], ),
@@ -136,13 +173,13 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('organisation_id', sa.Integer(), nullable=False),
-        sa.Column('notification_type', sa.Enum('task_assigned', 'task_due', 'task_completed', 'lead_assigned', 'lead_status_changed', 'site_visit_scheduled', 'site_visit_reminder', 'mention', 'lead_inactive', name='notificationtype'), nullable=False),
+        sa.Column('notification_type', notification_type_col, nullable=False),
         sa.Column('title', sa.String(length=255), nullable=False),
         sa.Column('message', sa.Text(), nullable=True),
         sa.Column('link', sa.String(length=500), nullable=True),
         sa.Column('metadata', sa.Text(), nullable=True),
         sa.Column('is_read', sa.Boolean(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.PrimaryKeyConstraint('id')

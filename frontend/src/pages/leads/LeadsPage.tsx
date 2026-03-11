@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent } from "@/components/ui/card"
 import {
   Select,
   SelectContent,
@@ -11,7 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { leadsApi, usersApi } from "@/services/api"
+import { leadsApi, notesApi, usersApi } from "@/services/api"
 import { useToast } from "@/components/ui/use-toast"
 import {
   Plus,
@@ -19,9 +18,10 @@ import {
   Edit2,
   Trash2,
   X,
-  User,
   Users,
-  Phone,
+  Clock,
+  AlertTriangle,
+  MessageSquare,
 } from "lucide-react"
 
 interface Lead {
@@ -39,6 +39,7 @@ interface Lead {
   project_interest: string
   assigned_to: number | null
   created_at: string
+  score?: number
 }
 
 interface OrgUser {
@@ -47,6 +48,19 @@ interface OrgUser {
   last_name: string
   email: string
   role: string
+}
+
+interface TimelineItem {
+  type: "activity" | "note" | "visit"
+  id: number
+  title?: string
+  content?: string
+  description?: string
+  created_at: string
+  user?: {
+    first_name: string
+    last_name?: string
+  }
 }
 
 function Modal({
@@ -62,14 +76,11 @@ function Modal({
 }) {
   if (!open) return null
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto m-4 shadow-2xl shadow-slate-200/50">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-end sm:items-center justify-center z-50 p-2 sm:p-4 overflow-y-auto">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full max-w-lg max-h-[92vh] sm:max-h-[90vh] overflow-y-auto shadow-2xl shadow-slate-200/50">
         <div className="flex justify-between items-center p-5 border-b border-slate-100">
           <h2 className="text-xl font-semibold text-slate-900">{title}</h2>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-slate-100 rounded-xl transition-colors"
-          >
+          <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-xl transition-colors">
             <X className="h-5 w-5" />
           </button>
         </div>
@@ -86,12 +97,48 @@ export default function LeadsPage() {
     source: "",
     priority: "",
     status: "",
-    assigned_to: "",
+    assigned_to: null as number | null,
   })
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [showBulkModal, setShowBulkModal] = useState(false)
+  const [showAgingModal, setShowAgingModal] = useState(false)
   const [editingLead, setEditingLead] = useState<Lead | null>(null)
   const [deletingLead, setDeletingLead] = useState<Lead | null>(null)
-  const [actionMenuLead, setActionMenuLead] = useState<number | null>(null)
+  const [selectedLeads, setSelectedLeads] = useState<number[]>([])
+  const [bulkAssignTo, setBulkAssignTo] = useState("")
+  const [timelineLead, setTimelineLead] = useState<Lead | null>(null)
+  const [newNote, setNewNote] = useState("")
+  
+  // Form state for create lead
+  const [createFormData, setCreateFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    source: "website",
+    priority: "medium",
+    assigned_to: "",
+    budget_min: "",
+    budget_max: "",
+    unit_type_preference: "",
+    notes: "",
+    project_interest: "",
+  })
+
+  // Form state for edit lead
+  const [editFormData, setEditFormData] = useState({
+    name: "",
+    email: "",
+    phone: "",
+    source: "website",
+    priority: "medium",
+    assigned_to: "",
+    budget_min: "",
+    budget_max: "",
+    unit_type_preference: "",
+    notes: "",
+    project_interest: "",
+  })
+
   const queryClient = useQueryClient()
   const { toast } = useToast()
 
@@ -108,13 +155,40 @@ export default function LeadsPage() {
           page,
           per_page: 20,
           search: search || undefined,
-          source: filters.source || undefined,
-          priority: filters.priority || undefined,
-          status: filters.status || undefined,
-          assigned_to: filters.assigned_to ? parseInt(filters.assigned_to) : undefined,
+          ...filters,
         })
         .then((res) => res.data),
   })
+
+  // Aging leads query
+  const { data: agingData } = useQuery({
+    queryKey: ["leads-aging"],
+    queryFn: () => leadsApi.getAging().then((res) => res.data),
+    enabled: showAgingModal,
+  })
+
+  const { data: timelineData, isLoading: timelineLoading } = useQuery({
+    queryKey: ["lead-timeline", timelineLead?.id],
+    queryFn: () =>
+      timelineLead?.id
+        ? leadsApi.getTimeline(timelineLead.id, { page: 1, per_page: 50 }).then((res) => res.data)
+        : Promise.resolve({ data: [] }),
+    enabled: !!timelineLead?.id,
+  })
+
+  const sources = [
+    "99acres",
+    "MagicBricks",
+    "Housing.com",
+    "NoBroker",
+    "Facebook",
+    "Google",
+    "Website",
+    "Referral",
+    "Walk-in",
+    "Exhibition",
+    "Other",
+  ]
 
   const createMutation = useMutation({
     mutationFn: (data: any) => leadsApi.create(data),
@@ -123,8 +197,8 @@ export default function LeadsPage() {
       setShowCreateModal(false)
       toast({ title: "Lead created successfully" })
     },
-    onError: (error: any) => {
-      toast({ variant: "destructive", title: "Failed to create lead", description: error.response?.data?.detail || "Unknown error" })
+    onError: () => {
+      toast({ variant: "destructive", title: "Failed to create lead" })
     },
   })
 
@@ -135,20 +209,8 @@ export default function LeadsPage() {
       setEditingLead(null)
       toast({ title: "Lead updated successfully" })
     },
-    onError: (error: any) => {
-      toast({ variant: "destructive", title: "Failed to update lead", description: error.response?.data?.detail || "Unknown error" })
-    },
-  })
-
-  const assignMutation = useMutation({
-    mutationFn: ({ id, assigned_to }: { id: number; assigned_to: number | null }) =>
-      leadsApi.update(id, { assigned_to }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["leads"] })
-      toast({ title: "Lead assigned successfully" })
-    },
-    onError: (error: any) => {
-      toast({ variant: "destructive", title: "Failed to assign lead", description: error.response?.data?.detail || "Unknown error" })
+    onError: () => {
+      toast({ variant: "destructive", title: "Failed to update lead" })
     },
   })
 
@@ -159,118 +221,170 @@ export default function LeadsPage() {
       setDeletingLead(null)
       toast({ title: "Lead deleted successfully" })
     },
-    onError: (error: any) => {
-      toast({ variant: "destructive", title: "Failed to delete lead", description: error.response?.data?.detail || "Unknown error" })
+    onError: () => {
+      toast({ variant: "destructive", title: "Failed to delete lead" })
+    },
+  })
+
+  const bulkAssignMutation = useMutation({
+    mutationFn: ({ leadIds, assignedTo }: { leadIds: number[]; assignedTo: number }) =>
+      leadsApi.bulkAssign(leadIds, assignedTo),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["leads"] })
+      setShowBulkModal(false)
+      setSelectedLeads([])
+      setBulkAssignTo("")
+      toast({ title: `${data.data.updated} leads assigned successfully` })
+    },
+    onError: () => {
+      toast({ variant: "destructive", title: "Failed to assign leads" })
+    },
+  })
+
+  const addNoteMutation = useMutation({
+    mutationFn: (payload: { lead_id: number; content: string }) => notesApi.create(payload),
+    onSuccess: () => {
+      if (timelineLead?.id) {
+        queryClient.invalidateQueries({ queryKey: ["lead-timeline", timelineLead.id] })
+      }
+      setNewNote("")
+      toast({ title: "Note added" })
+    },
+    onError: () => {
+      toast({ variant: "destructive", title: "Failed to add note" })
     },
   })
 
   const handleCreateLead = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    const formData = new FormData(e.currentTarget)
-    const data: any = {}
-    formData.forEach((value, key) => {
-      if (value) data[key] = value
-    })
-    if (data.budget_min) data.budget_min = parseFloat(data.budget_min)
-    if (data.budget_max) data.budget_max = parseFloat(data.budget_max)
-    if (data.assigned_to === "unassigned") data.assigned_to = null
+    const data: any = { ...createFormData }
+    if (data.budget_min) data.budget_min = Number(data.budget_min)
+    if (data.budget_max) data.budget_max = Number(data.budget_max)
+    if (data.assigned_to) data.assigned_to = Number(data.assigned_to)
+    else delete data.assigned_to
     createMutation.mutate(data)
   }
 
   const handleUpdateLead = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
     if (!editingLead) return
-    const formData = new FormData(e.currentTarget)
-    const data: any = {}
-    formData.forEach((value, key) => {
-      if (value) data[key] = value
-    })
-    if (data.budget_min) data.budget_min = parseFloat(data.budget_min)
-    if (data.budget_max) data.budget_max = parseFloat(data.budget_max)
-    if (data.assigned_to === "unassigned") data.assigned_to = null
+    const data: any = {
+      name: editingLead.name,
+      email: editingLead.email,
+      phone: editingLead.phone,
+      source: editingLead.source,
+      priority: editingLead.priority,
+      assigned_to: editingLead.assigned_to,
+      budget_min: editingLead.budget_min,
+      budget_max: editingLead.budget_max,
+      notes: editingLead.notes,
+      unit_type_preference: editingLead.unit_type_preference,
+      project_interest: editingLead.project_interest,
+    }
+    if (data.budget_min) data.budget_min = Number(data.budget_min)
+    if (data.budget_max) data.budget_max = Number(data.budget_max)
+    if (data.assigned_to) data.assigned_to = Number(data.assigned_to)
+    else delete data.assigned_to
     updateMutation.mutate({ id: editingLead.id, data })
   }
 
-  const handleAssignAgent = (leadId: number, userId: string) => {
-    const assigned_to = userId === "unassigned" ? null : parseInt(userId)
-    assignMutation.mutate({ id: leadId, assigned_to })
-  }
-
-  const handleDeleteLead = () => {
-    if (deletingLead) {
-      deleteMutation.mutate(deletingLead.id)
+  const handleBulkAssign = () => {
+    if (selectedLeads.length === 0) {
+      toast({ variant: "destructive", title: "Please select leads to assign" })
+      return
     }
+    if (!bulkAssignTo) {
+      toast({ variant: "destructive", title: "Please select an agent" })
+      return
+    }
+    bulkAssignMutation.mutate({ leadIds: selectedLeads, assignedTo: Number(bulkAssignTo) })
   }
 
-  const getAssignedUser = (userId: number | null) => {
-    if (!userId) return null
-    return orgUsers?.find((u) => u.id === userId)
+  const toggleLeadSelection = (id: number) => {
+    setSelectedLeads((prev) =>
+      prev.includes(id) ? prev.filter((l) => l !== id) : [...prev, id]
+    )
+  }
+
+  const selectAllLeads = () => {
+    if (selectedLeads.length === data?.data?.length) {
+      setSelectedLeads([])
+    } else {
+      setSelectedLeads(data?.data?.map((l: Lead) => l.id) || [])
+    }
   }
 
   const getPriorityColor = (priority: string) => {
     switch (priority) {
-      case "high":
-        return "bg-red-100 text-red-700 border-red-200"
-      case "medium":
-        return "bg-amber-100 text-amber-700 border-amber-200"
-      default:
-        return "bg-emerald-100 text-emerald-700 border-emerald-200"
+      case "high": return "bg-red-100 text-red-700"
+      case "medium": return "bg-yellow-100 text-yellow-700"
+      case "low": return "bg-green-100 text-green-700"
+      default: return "bg-zinc-100 text-zinc-700"
     }
   }
 
+  const handleAddNote = () => {
+    if (!timelineLead?.id || !newNote.trim()) return
+    addNoteMutation.mutate({ lead_id: timelineLead.id, content: newNote.trim() })
+  }
+
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+    <div className="space-y-8">
+      <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Leads</h1>
-          <p className="text-slate-500 mt-1">Manage and track your sales leads</p>
+          <h1 className="text-4xl md:text-5xl font-light text-zinc-900 leading-tight">
+            Lead <span className="font-semibold">Engine</span>
+          </h1>
+          <p className="text-zinc-500 mt-2">Capture, qualify, and assign leads with precision.</p>
         </div>
-        <Button
-          onClick={() => setShowCreateModal(true)}
-          className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-lg shadow-indigo-200"
-        >
-          <Plus className="mr-2 h-4 w-4" />
-          New Lead
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setShowAgingModal(true)}
+            className="rounded-full border-zinc-300 hover:bg-zinc-100"
+          >
+            <AlertTriangle className="mr-2 h-4 w-4" />
+            Aging ({agingData?.total || 0})
+          </Button>
+          <Button variant="outline" onClick={() => setShowBulkModal(true)} disabled={selectedLeads.length === 0} className="rounded-full border-zinc-300 hover:bg-zinc-100">
+            <Users className="mr-2 h-4 w-4" />
+            Bulk Assign ({selectedLeads.length})
+          </Button>
+          <Button onClick={() => setShowCreateModal(true)} className="rounded-full bg-zinc-900 hover:bg-zinc-800 text-white">
+            <Plus className="mr-2 h-4 w-4" />
+            New Lead
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
-      <Card className="border-0 shadow-lg shadow-slate-100/50">
-        <CardContent className="p-4">
-          <div className="flex flex-wrap gap-3">
+      <div className="bg-white rounded-3xl border border-zinc-200 overflow-hidden">
+        <div className="p-4">
+          <div className="flex flex-wrap gap-4">
             <div className="flex-1 min-w-[200px]">
               <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
                 <Input
                   placeholder="Search leads..."
-                  className="pl-10 bg-slate-50 border-slate-200 rounded-xl"
+                  className="pl-9"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
               </div>
             </div>
-            <Select
-              value={filters.source}
-              onValueChange={(value) => setFilters({ ...filters, source: value })}
-            >
-              <SelectTrigger className="w-[140px] bg-slate-50 border-slate-200 rounded-xl">
+            <Select value={filters.source} onValueChange={(v) => setFilters({ ...filters, source: v })}>
+              <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Source" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Sources</SelectItem>
-                <SelectItem value="99acres">99acres</SelectItem>
-                <SelectItem value="MagicBricks">MagicBricks</SelectItem>
-                <SelectItem value="Referral">Referral</SelectItem>
-                <SelectItem value="Website">Website</SelectItem>
-                <SelectItem value="Walk-in">Walk-in</SelectItem>
+                {sources.map((s) => (
+                  <SelectItem key={s} value={s}>{s}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
-            <Select
-              value={filters.priority}
-              onValueChange={(value) => setFilters({ ...filters, priority: value })}
-            >
-              <SelectTrigger className="w-[140px] bg-slate-50 border-slate-200 rounded-xl">
+            <Select value={filters.priority} onValueChange={(v) => setFilters({ ...filters, priority: v })}>
+              <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Priority" />
               </SelectTrigger>
               <SelectContent>
@@ -280,375 +394,167 @@ export default function LeadsPage() {
                 <SelectItem value="low">Low</SelectItem>
               </SelectContent>
             </Select>
-            <Select
-              value={filters.status}
-              onValueChange={(value) => setFilters({ ...filters, status: value })}
-            >
-              <SelectTrigger className="w-[140px] bg-slate-50 border-slate-200 rounded-xl">
+            <Select value={filters.status} onValueChange={(v) => setFilters({ ...filters, status: v })}>
+              <SelectTrigger className="w-[140px]">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
-                <SelectItem value="New">New</SelectItem>
-                <SelectItem value="Contacted">Contacted</SelectItem>
-                <SelectItem value="Site Visit Scheduled">Site Visit</SelectItem>
-                <SelectItem value="Negotiation">Negotiation</SelectItem>
-                <SelectItem value="Won">Won</SelectItem>
-                <SelectItem value="Lost">Lost</SelectItem>
+                <SelectItem value="new">New</SelectItem>
+                <SelectItem value="contacted">Contacted</SelectItem>
+                <SelectItem value="site_visit">Site Visit</SelectItem>
+                <SelectItem value="negotiation">Negotiation</SelectItem>
+                <SelectItem value="won">Won</SelectItem>
+                <SelectItem value="lost">Lost</SelectItem>
               </SelectContent>
             </Select>
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Leads Table */}
-      <Card className="border-0 shadow-lg shadow-slate-100/50 overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="bg-white rounded-3xl border border-zinc-200 overflow-hidden">
+        <div className="p-0">
           {isLoading ? (
-            <div className="flex items-center justify-center h-64">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
-            </div>
+            <div className="text-center py-10">Loading...</div>
           ) : (
-            <table className="w-full">
-              <thead className="bg-slate-50 border-b border-slate-100">
-                <tr>
-                  <th className="text-left p-4 font-semibold text-slate-600 text-sm">Lead</th>
-                  <th className="text-left p-4 font-semibold text-slate-600 text-sm">Contact</th>
-                  <th className="text-left p-4 font-semibold text-slate-600 text-sm">Source</th>
-                  <th className="text-left p-4 font-semibold text-slate-600 text-sm">Priority</th>
-                  <th className="text-left p-4 font-semibold text-slate-600 text-sm">Status</th>
-                  <th className="text-left p-4 font-semibold text-slate-600 text-sm">Assigned To</th>
-                  <th className="p-4"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {data?.data?.map((lead: Lead) => (
-                  <tr
-                    key={lead.id}
-                    className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors"
-                  >
-                    <td className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-indigo-600 font-semibold">
-                          {lead.name.charAt(0).toUpperCase()}
-                        </div>
-                        <div>
-                          <p className="font-semibold text-slate-900">{lead.name}</p>
-                          {lead.email && (
-                            <p className="text-xs text-slate-500">{lead.email}</p>
-                          )}
-                        </div>
-                      </div>
-                    </td>
-                    <td className="p-4">
-                      {lead.phone && (
-                        <p className="text-sm text-slate-600 flex items-center gap-1">
-                          <Phone className="h-3 w-3" />
-                          {lead.phone}
-                        </p>
-                      )}
-                    </td>
-                    <td className="p-4">
-                      <span className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 text-slate-600">
-                        {lead.source || "-"}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <span
-                        className={`inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-medium border ${getPriorityColor(
-                          lead.priority
-                        )}`}
-                      >
-                        {lead.priority}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <span className="text-sm text-slate-600 capitalize">
-                        {lead.status?.replace("_", " ")}
-                      </span>
-                    </td>
-                    <td className="p-4">
-                      <Select
-                        value={lead.assigned_to?.toString() || "unassigned"}
-                        onValueChange={(value) => handleAssignAgent(lead.id, value)}
-                      >
-                        <SelectTrigger className="w-[180px] bg-white border-slate-200 rounded-xl">
-                          <div className="flex items-center gap-2">
-                            {lead.assigned_to ? (
-                              <>
-                                <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xs font-medium">
-                                  {getAssignedUser(lead.assigned_to)?.first_name?.charAt(0) || "?"}
-                                </div>
-                                <SelectValue placeholder="Assign agent">
-                                  {getAssignedUser(lead.assigned_to)?.first_name} {getAssignedUser(lead.assigned_to)?.last_name || ""}
-                                </SelectValue>
-                              </>
-                            ) : (
-                              <>
-                                <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center text-slate-500">
-                                  <User className="h-3 w-3" />
-                                </div>
-                                <SelectValue placeholder="Assign agent" />
-                              </>
-                            )}
-                          </div>
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="unassigned">
-                            <div className="flex items-center gap-2">
-                              <div className="w-6 h-6 rounded-full bg-slate-200 flex items-center justify-center">
-                                <User className="h-3 w-3 text-slate-500" />
-                              </div>
-                              <span>Unassigned</span>
-                            </div>
-                          </SelectItem>
-                          {orgUsers?.map((user) => (
-                            <SelectItem key={user.id} value={user.id.toString()}>
-                              <div className="flex items-center gap-2">
-                                <div className="w-6 h-6 rounded-full bg-indigo-100 flex items-center justify-center text-indigo-600 text-xs font-medium">
-                                  {user.first_name.charAt(0)}
-                                </div>
-                                <span>{user.first_name} {user.last_name || ""}</span>
-                                <span className="text-xs text-slate-400 ml-auto capitalize">({user.role})</span>
-                              </div>
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </td>
-                    <td className="p-4">
-                      <div className="relative">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-slate-400 hover:text-slate-600"
-                          onClick={() =>
-                            setActionMenuLead(actionMenuLead === lead.id ? null : lead.id)
-                          }
-                        >
-                          <Edit2 className="h-4 w-4" />
-                        </Button>
-                        {actionMenuLead === lead.id && (
-                          <div className="absolute right-0 top-full mt-1 bg-white border-0 rounded-xl shadow-xl shadow-slate-200/50 z-10 min-w-[160px] overflow-hidden">
-                            <button
-                              className="w-full text-left px-4 py-2.5 hover:bg-slate-50 flex items-center text-sm"
-                              onClick={() => {
-                                setEditingLead(lead)
-                                setActionMenuLead(null)
-                              }}
-                            >
-                              <Edit2 className="h-4 w-4 mr-2 text-slate-500" />
-                              Edit Details
-                            </button>
-                            <button
-                              className="w-full text-left px-4 py-2.5 hover:bg-red-50 flex items-center text-sm text-red-600"
-                              onClick={() => {
-                                setDeletingLead(lead)
-                                setActionMenuLead(null)
-                              }}
-                            >
-                              <Trash2 className="h-4 w-4 mr-2" />
-                              Delete
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </td>
+            <>
+              <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px]">
+                <thead className="border-b bg-zinc-50">
+                  <tr>
+                    <th className="p-4 w-10">
+                      <input
+                        type="checkbox"
+                        checked={selectedLeads.length === data?.data?.length && data?.data?.length > 0}
+                        onChange={selectAllLeads}
+                        className="rounded"
+                      />
+                    </th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Name</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Source</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Budget</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Priority</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Score</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Status</th>
+                    <th className="text-left p-4 font-medium text-zinc-600">Assigned</th>
+                    <th className="p-4"></th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {data?.data?.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16">
-              <div className="w-20 h-20 rounded-full bg-slate-50 flex items-center justify-center mb-4">
-                <Users className="h-10 w-10 text-slate-300" />
+                </thead>
+                <tbody>
+                  {data?.data?.map((lead: Lead) => (
+                    <tr key={lead.id} className="border-b hover:bg-zinc-50 transition-colors">
+                      <td className="p-4">
+                        <input
+                          type="checkbox"
+                          checked={selectedLeads.includes(lead.id)}
+                          onChange={() => toggleLeadSelection(lead.id)}
+                          className="rounded"
+                        />
+                      </td>
+                      <td className="p-4">
+                        <div className="font-medium text-zinc-900">{lead.name}</div>
+                        <div className="text-xs text-zinc-500">{lead.email}</div>
+                      </td>
+                      <td className="p-4 text-sm">{lead.source}</td>
+                      <td className="p-4 text-sm">
+                        {lead.budget_min || lead.budget_max
+                          ? `₹${(lead.budget_min || 0) / 100000}L - ₹${(lead.budget_max || 0) / 100000}L`
+                          : "-"}
+                      </td>
+                      <td className="p-4">
+                        <span className={`inline-flex px-2 py-1 rounded-full text-xs font-medium capitalize ${getPriorityColor(lead.priority)}`}>
+                          {lead.priority}
+                        </span>
+                      </td>
+                      <td className="p-4">
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-2 bg-zinc-200 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-black"
+                              style={{ width: `${lead.score || 0}%` }}
+                            />
+                          </div>
+                          <span className="text-xs">{lead.score || 0}</span>
+                        </div>
+                      </td>
+                      <td className="p-4 text-sm capitalize">{lead.status}</td>
+                      <td className="p-4 text-sm">
+                        {lead.assigned_to
+                          ? orgUsers?.find((u) => u.id === lead.assigned_to)?.first_name || "Assigned"
+                          : "-"}
+                      </td>
+                      <td className="p-4">
+                        <div className="flex gap-1">
+                          <Button variant="ghost" size="icon" onClick={() => setTimelineLead(lead)}>
+                            <Clock className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setEditingLead(lead)}>
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button variant="ghost" size="icon" onClick={() => setDeletingLead(lead)}>
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
               </div>
-              <h3 className="text-lg font-semibold text-slate-900">No leads found</h3>
-              <p className="text-sm text-slate-500 mt-1">Try adjusting your filters or add a new lead</p>
-            </div>
+              {data?.data?.length === 0 && (
+                <div className="text-center py-10 text-zinc-500">No leads found</div>
+              )}
+            </>
           )}
         </div>
-      </Card>
+      </div>
 
       {/* Pagination */}
       {data?.meta?.pages > 1 && (
         <div className="flex justify-center gap-2">
-          <Button
-            variant="outline"
-            className="rounded-xl"
-            disabled={page === 1}
-            onClick={() => setPage(page - 1)}
-          >
-            Previous
-          </Button>
-          <span className="flex items-center px-4 text-sm text-slate-600">
-            Page {page} of {data.meta.pages}
-          </span>
-          <Button
-            variant="outline"
-            className="rounded-xl"
-            disabled={page >= data.meta.pages}
-            onClick={() => setPage(page + 1)}
-          >
-            Next
-          </Button>
+          <Button variant="outline" disabled={page === 1} onClick={() => setPage(page - 1)}>Previous</Button>
+          <span className="flex items-center px-4 text-sm">Page {page} of {data.meta.pages}</span>
+          <Button variant="outline" disabled={page >= data.meta.pages} onClick={() => setPage(page + 1)}>Next</Button>
         </div>
       )}
 
-      {/* Create Modal */}
-      <Modal open={showCreateModal} onClose={() => setShowCreateModal(false)} title="Create New Lead">
-        <form onSubmit={handleCreateLead} className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="create-name" className="text-slate-700">Name *</Label>
-              <Input id="create-name" name="name" required className="rounded-xl bg-slate-50 border-slate-200" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-email" className="text-slate-700">Email</Label>
-              <Input id="create-email" name="email" type="email" className="rounded-xl bg-slate-50 border-slate-200" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="create-phone" className="text-slate-700">Phone</Label>
-              <Input id="create-phone" name="phone" className="rounded-xl bg-slate-50 border-slate-200" />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-slate-700">Source</Label>
-              <Select name="source">
-                <SelectTrigger className="rounded-xl bg-slate-50 border-slate-200">
-                  <SelectValue placeholder="Select source" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="99acres">99acres</SelectItem>
-                  <SelectItem value="MagicBricks">MagicBricks</SelectItem>
-                  <SelectItem value="Referral">Referral</SelectItem>
-                  <SelectItem value="Website">Website</SelectItem>
-                  <SelectItem value="Walk-in">Walk-in</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className="text-slate-700">Priority</Label>
-              <Select name="priority" defaultValue="medium">
-                <SelectTrigger className="rounded-xl bg-slate-50 border-slate-200">
-                  <SelectValue placeholder="Select priority" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                  <SelectItem value="low">Low</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-slate-700">Status</Label>
-              <Select name="status" defaultValue="New">
-                <SelectTrigger className="rounded-xl bg-slate-50 border-slate-200">
-                  <SelectValue placeholder="Select status" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="New">New</SelectItem>
-                  <SelectItem value="Contacted">Contacted</SelectItem>
-                  <SelectItem value="Site Visit Scheduled">Site Visit</SelectItem>
-                  <SelectItem value="Negotiation">Negotiation</SelectItem>
-                  <SelectItem value="Won">Won</SelectItem>
-                  <SelectItem value="Lost">Lost</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-slate-700">Assign To</Label>
-            <Select name="assigned_to" defaultValue="unassigned">
-              <SelectTrigger className="rounded-xl bg-slate-50 border-slate-200">
-                <SelectValue placeholder="Select agent" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unassigned">Unassigned</SelectItem>
-                {orgUsers?.map((user) => (
-                  <SelectItem key={user.id} value={user.id.toString()}>
-                    {user.first_name} {user.last_name || ""} ({user.role})
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="create-budget_min" className="text-slate-700">Min Budget (₹)</Label>
-              <Input id="create-budget_min" name="budget_min" type="number" className="rounded-xl bg-slate-50 border-slate-200" />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="create-budget_max" className="text-slate-700">Max Budget (₹)</Label>
-              <Input id="create-budget_max" name="budget_max" type="number" className="rounded-xl bg-slate-50 border-slate-200" />
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="create-notes" className="text-slate-700">Notes</Label>
-            <textarea
-              id="create-notes"
-              name="notes"
-              className="flex min-h-[80px] w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-sm"
-              rows={3}
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="outline" className="rounded-xl" onClick={() => setShowCreateModal(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={createMutation.isPending} className="rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600">
-              {createMutation.isPending ? "Creating..." : "Create Lead"}
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Edit Modal */}
-      <Modal open={!!editingLead} onClose={() => setEditingLead(null)} title="Edit Lead">
-        {editingLead && (
-          <form onSubmit={handleUpdateLead} className="space-y-5">
+      {/* Create Lead Modal */}
+      {showCreateModal && (
+        <Modal open={showCreateModal} onClose={() => { setShowCreateModal(false); setCreateFormData({ name: "", email: "", phone: "", source: "website", priority: "medium", assigned_to: "", budget_min: "", budget_max: "", unit_type_preference: "", notes: "", project_interest: "" }) }} title="Create Lead">
+          <form onSubmit={handleCreateLead} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-slate-700">Name *</Label>
-                <Input name="name" defaultValue={editingLead.name} required className="rounded-xl bg-slate-50 border-slate-200" />
+                <Label>Name *</Label>
+                <Input value={createFormData.name} onChange={(e) => setCreateFormData({ ...createFormData, name: e.target.value })} required />
               </div>
               <div className="space-y-2">
-                <Label className="text-slate-700">Email</Label>
-                <Input name="email" type="email" defaultValue={editingLead.email || ""} className="rounded-xl bg-slate-50 border-slate-200" />
+                <Label>Email</Label>
+                <Input type="email" value={createFormData.email} onChange={(e) => setCreateFormData({ ...createFormData, email: e.target.value })} />
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-slate-700">Phone</Label>
-                <Input name="phone" defaultValue={editingLead.phone || ""} className="rounded-xl bg-slate-50 border-slate-200" />
+                <Label>Phone</Label>
+                <Input value={createFormData.phone} onChange={(e) => setCreateFormData({ ...createFormData, phone: e.target.value })} />
               </div>
               <div className="space-y-2">
-                <Label className="text-slate-700">Source</Label>
-                <Select name="source" defaultValue={editingLead.source || ""}>
-                  <SelectTrigger className="rounded-xl bg-slate-50 border-slate-200">
-                    <SelectValue placeholder="Select source" />
-                  </SelectTrigger>
+                <Label>Source</Label>
+                <Select value={createFormData.source} onValueChange={(value) => setCreateFormData({ ...createFormData, source: value })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="99acres">99acres</SelectItem>
-                    <SelectItem value="MagicBricks">MagicBricks</SelectItem>
-                    <SelectItem value="Referral">Referral</SelectItem>
-                    <SelectItem value="Website">Website</SelectItem>
-                    <SelectItem value="Walk-in">Walk-in</SelectItem>
+                    {sources.map((s) => (
+                      <SelectItem key={s} value={s.toLowerCase().replace(" ", "_")}>{s}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-slate-700">Priority</Label>
-                <Select name="priority" defaultValue={editingLead.priority || "medium"}>
-                  <SelectTrigger className="rounded-xl bg-slate-50 border-slate-200">
-                    <SelectValue placeholder="Select priority" />
-                  </SelectTrigger>
+                <Label>Priority</Label>
+                <Select value={createFormData.priority} onValueChange={(value) => setCreateFormData({ ...createFormData, priority: value })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="high">High</SelectItem>
                     <SelectItem value="medium">Medium</SelectItem>
@@ -657,68 +563,231 @@ export default function LeadsPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label className="text-slate-700">Status</Label>
-                <Select name="status" defaultValue={editingLead.status || "New"}>
-                  <SelectTrigger className="rounded-xl bg-slate-50 border-slate-200">
-                    <SelectValue placeholder="Select status" />
-                  </SelectTrigger>
+                <Label>Assign To</Label>
+                <Select value={createFormData.assigned_to} onValueChange={(value) => setCreateFormData({ ...createFormData, assigned_to: value })}>
+                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="New">New</SelectItem>
-                    <SelectItem value="Contacted">Contacted</SelectItem>
-                    <SelectItem value="Site Visit Scheduled">Site Visit</SelectItem>
-                    <SelectItem value="Negotiation">Negotiation</SelectItem>
-                    <SelectItem value="Won">Won</SelectItem>
-                    <SelectItem value="Lost">Lost</SelectItem>
+                    {orgUsers?.map((u) => (
+                      <SelectItem key={u.id} value={String(u.id)}>{u.first_name} {u.last_name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label className="text-slate-700">Min Budget (₹)</Label>
-                <Input name="budget_min" type="number" defaultValue={editingLead.budget_min || ""} className="rounded-xl bg-slate-50 border-slate-200" />
+                <Label>Min Budget (₹)</Label>
+                <Input type="number" value={createFormData.budget_min} onChange={(e) => setCreateFormData({ ...createFormData, budget_min: e.target.value })} />
               </div>
               <div className="space-y-2">
-                <Label className="text-slate-700">Max Budget (₹)</Label>
-                <Input name="budget_max" type="number" defaultValue={editingLead.budget_max || ""} className="rounded-xl bg-slate-50 border-slate-200" />
+                <Label>Max Budget (₹)</Label>
+                <Input type="number" value={createFormData.budget_max} onChange={(e) => setCreateFormData({ ...createFormData, budget_max: e.target.value })} />
               </div>
             </div>
             <div className="space-y-2">
-              <Label className="text-slate-700">Notes</Label>
-              <textarea name="notes" className="flex min-h-[80px] w-full rounded-xl bg-slate-50 border border-slate-200 px-3 py-2 text-sm" rows={3} defaultValue={editingLead.notes || ""} />
+              <Label>Notes</Label>
+              <textarea value={createFormData.notes} onChange={(e) => setCreateFormData({ ...createFormData, notes: e.target.value })} className="w-full rounded-md border p-2" rows={3} />
             </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <Button type="button" variant="outline" className="rounded-xl" onClick={() => setEditingLead(null)}>Cancel</Button>
-              <Button type="submit" disabled={updateMutation.isPending} className="rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600">
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => { setShowCreateModal(false); setCreateFormData({ name: "", email: "", phone: "", source: "website", priority: "medium", assigned_to: "", budget_min: "", budget_max: "", unit_type_preference: "", notes: "", project_interest: "" }) }}>Cancel</Button>
+              <Button type="submit" disabled={createMutation.isPending}>
+                {createMutation.isPending ? "Creating..." : "Create Lead"}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Edit Lead Modal */}
+      {editingLead && (
+        <Modal open={!!editingLead} onClose={() => { setEditingLead(null); setEditFormData({ name: "", email: "", phone: "", source: "website", priority: "medium", assigned_to: "", budget_min: "", budget_max: "", unit_type_preference: "", notes: "", project_interest: "" }) }} title="Edit Lead">
+          <form onSubmit={handleUpdateLead} className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Name *</Label>
+                <Input value={editingLead.name} onChange={(e) => setEditingLead({ ...editingLead, name: e.target.value })} required />
+              </div>
+              <div className="space-y-2">
+                <Label>Email</Label>
+                <Input type="email" value={editingLead.email} onChange={(e) => setEditingLead({ ...editingLead, email: e.target.value })} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Phone</Label>
+                <Input value={editingLead.phone} onChange={(e) => setEditingLead({ ...editingLead, phone: e.target.value })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Source</Label>
+                <Select value={editingLead.source} onValueChange={(value) => setEditingLead({ ...editingLead, source: value })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {sources.map((s) => (
+                      <SelectItem key={s} value={s.toLowerCase().replace(" ", "_")}>{s}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Priority</Label>
+                <Select value={editingLead.priority} onValueChange={(value) => setEditingLead({ ...editingLead, priority: value })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="high">High</SelectItem>
+                    <SelectItem value="medium">Medium</SelectItem>
+                    <SelectItem value="low">Low</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Assign To</Label>
+                <Select value={editingLead.assigned_to?.toString() || ""} onValueChange={(value) => setEditingLead({ ...editingLead, assigned_to: value ? Number(value) : null })}>
+                  <SelectTrigger><SelectValue placeholder="Unassigned" /></SelectTrigger>
+                  <SelectContent>
+                    {orgUsers?.map((u) => (
+                      <SelectItem key={u.id} value={String(u.id)}>{u.first_name} {u.last_name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Min Budget (₹)</Label>
+                <Input type="number" value={editingLead.budget_min || ""} onChange={(e) => setEditingLead({ ...editingLead, budget_min: e.target.value ? Number(e.target.value) : null })} />
+              </div>
+              <div className="space-y-2">
+                <Label>Max Budget (₹)</Label>
+                <Input type="number" value={editingLead.budget_max || ""} onChange={(e) => setEditingLead({ ...editingLead, budget_max: e.target.value ? Number(e.target.value) : null })} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <textarea value={editingLead.notes} onChange={(e) => setEditingLead({ ...editingLead, notes: e.target.value })} className="w-full rounded-md border p-2" rows={3} />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => { setEditingLead(null); setEditFormData({ name: "", email: "", phone: "", source: "website", priority: "medium", assigned_to: "", budget_min: "", budget_max: "", unit_type_preference: "", notes: "", project_interest: "" }) }}>Cancel</Button>
+              <Button type="submit" disabled={updateMutation.isPending}>
                 {updateMutation.isPending ? "Saving..." : "Save Changes"}
               </Button>
             </div>
           </form>
-        )}
-      </Modal>
+        </Modal>
+      )}
 
       {/* Delete Confirmation Modal */}
-      <Modal open={!!deletingLead} onClose={() => setDeletingLead(null)} title="Delete Lead">
-        <div className="space-y-5">
-          <div className="flex items-center gap-4 p-4 bg-red-50 rounded-xl">
-            <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
-              <Trash2 className="h-6 w-6 text-red-600" />
-            </div>
-            <div>
-              <p className="font-semibold text-slate-900">Delete Lead?</p>
-              <p className="text-sm text-slate-600">
-                Are you sure you want to delete <span className="font-medium">{deletingLead?.name}</span>? This action cannot be undone.
-              </p>
+      {deletingLead && (
+        <Modal open={!!deletingLead} onClose={() => setDeletingLead(null)} title="Delete Lead">
+          <div className="space-y-4">
+            <p>Are you sure you want to delete this lead?</p>
+            <p className="font-medium">{deletingLead.name}</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDeletingLead(null)}>Cancel</Button>
+              <Button variant="destructive" onClick={() => deleteMutation.mutate(deletingLead.id)}>
+                Delete
+              </Button>
             </div>
           </div>
-          <div className="flex justify-end gap-3">
-            <Button variant="outline" className="rounded-xl" onClick={() => setDeletingLead(null)}>Cancel</Button>
-            <Button variant="destructive" onClick={handleDeleteLead} disabled={deleteMutation.isPending} className="rounded-xl bg-red-500 hover:bg-red-600">
-              {deleteMutation.isPending ? "Deleting..." : "Delete Lead"}
-            </Button>
+        </Modal>
+      )}
+
+      {/* Bulk Assign Modal */}
+      {showBulkModal && (
+        <Modal open={showBulkModal} onClose={() => setShowBulkModal(false)} title="Bulk Assign Leads">
+          <div className="space-y-4">
+            <p>Assign {selectedLeads.length} selected leads to:</p>
+            <Select value={bulkAssignTo} onValueChange={setBulkAssignTo}>
+              <SelectTrigger><SelectValue placeholder="Select agent" /></SelectTrigger>
+              <SelectContent>
+                {orgUsers?.map((u) => (
+                  <SelectItem key={u.id} value={String(u.id)}>{u.first_name} {u.last_name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" className="border-zinc-300" onClick={() => setShowBulkModal(false)}>Cancel</Button>
+              <Button onClick={handleBulkAssign} disabled={bulkAssignMutation.isPending}>
+                {bulkAssignMutation.isPending ? "Assigning..." : "Assign"}
+              </Button>
+            </div>
           </div>
-        </div>
-      </Modal>
+        </Modal>
+      )}
+
+      {/* Aging Leads Modal */}
+      {showAgingModal && (
+        <Modal open={showAgingModal} onClose={() => setShowAgingModal(false)} title="Aging Leads">
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-500">Leads with no activity in the last 7+ days</p>
+            {agingData?.leads && Object.entries(agingData.leads).map(([period, leads]: [string, any]) => (
+              <div key={period} className="border rounded-lg p-3">
+                <h4 className="font-medium text-sm mb-2">{period} days</h4>
+                <div className="space-y-1">
+                  {leads.length > 0 ? leads.slice(0, 5).map((l: Lead) => (
+                    <div key={l.id} className="text-sm flex justify-between">
+                      <span>{l.name}</span>
+                      <span className="text-zinc-500">{l.email}</span>
+                    </div>
+                  )) : <p className="text-xs text-zinc-400">No leads</p>}
+                  {leads.length > 5 && <p className="text-xs text-zinc-500">+{leads.length - 5} more</p>}
+                </div>
+              </div>
+            ))}
+            <div className="flex justify-end">
+              <Button variant="outline" onClick={() => setShowAgingModal(false)}>Close</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Lead Timeline Modal */}
+      {timelineLead && (
+        <Modal open={!!timelineLead} onClose={() => { setTimelineLead(null); setNewNote("") }} title={`Timeline: ${timelineLead.name}`}>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Add Note (@mention supported)</Label>
+              <textarea
+                className="w-full rounded-md border p-2"
+                rows={3}
+                placeholder="Type your note here..."
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+              />
+              <div className="flex justify-end">
+                <Button onClick={handleAddNote} disabled={addNoteMutation.isPending || !newNote.trim()}>
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  {addNoteMutation.isPending ? "Adding..." : "Add Note"}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-3 max-h-[50vh] overflow-y-auto pr-1">
+              {timelineLoading ? (
+                <p className="text-sm text-zinc-500">Loading timeline...</p>
+              ) : (timelineData?.data?.length || 0) === 0 ? (
+                <p className="text-sm text-zinc-500">No timeline items yet.</p>
+              ) : (
+                timelineData.data.map((item: TimelineItem) => (
+                  <div key={`${item.type}-${item.id}`} className="rounded-lg border p-3">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-medium capitalize">{item.type}</p>
+                      <p className="text-xs text-zinc-500">{new Date(item.created_at).toLocaleString()}</p>
+                    </div>
+                    <p className="text-sm text-zinc-800 mt-1">{item.title || item.content || item.description || "-"}</p>
+                    {item.user && (
+                      <p className="text-xs text-zinc-500 mt-2">
+                        by {item.user.first_name} {item.user.last_name || ""}
+                      </p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }

@@ -55,7 +55,7 @@ def create_activity(
         activity_type=request.activity_type,
         title=request.title,
         description=request.description,
-        metadata=request.metadata
+        activity_metadata=request.metadata
     )
     db.add(activity)
     db.commit()
@@ -68,6 +68,8 @@ def get_lead_timeline(
     lead_id: int,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    include_notes: bool = True,
+    include_visits: bool = True,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -84,20 +86,19 @@ def get_lead_timeline(
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
 
-    query = db.query(models.Activity).filter(
+    timeline_items = []
+
+    # Get activities
+    activities = db.query(models.Activity).filter(
         models.Activity.lead_id == lead_id
-    ).order_by(models.Activity.created_at.desc())
+    ).order_by(models.Activity.created_at.desc()).all()
 
-    total = query.count()
-    activities = query.offset((page - 1) * per_page).limit(per_page).all()
-
-    # Get user info for each activity
-    result = []
     for activity in activities:
         user = db.query(models.User).filter(models.User.id == activity.user_id).first()
-        result.append({
+        timeline_items.append({
+            "type": "activity",
             "id": activity.id,
-            "activity_type": activity.activity_type.value,
+            "activity_type": activity.activity_type,
             "title": activity.title,
             "description": activity.description,
             "created_at": activity.created_at,
@@ -109,8 +110,65 @@ def get_lead_timeline(
             } if user else None
         })
 
+    # Get notes
+    if include_notes:
+        notes = db.query(models.Note).filter(
+            models.Note.lead_id == lead_id
+        ).order_by(models.Note.created_at.desc()).all()
+
+        for note in notes:
+            user = db.query(models.User).filter(models.User.id == note.created_by_id).first()
+            timeline_items.append({
+                "type": "note",
+                "id": note.id,
+                "title": "Note",
+                "content": note.content,
+                "is_pinned": note.is_pinned,
+                "created_at": note.created_at,
+                "user": {
+                    "id": user.id,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "email": user.email
+                } if user else None
+            })
+
+    # Get visits
+    if include_visits:
+        visits = db.query(models.SiteVisit).filter(
+            models.SiteVisit.lead_id == lead_id
+        ).order_by(models.SiteVisit.scheduled_date.desc()).all()
+
+        for visit in visits:
+            agent = db.query(models.User).filter(models.User.id == visit.assigned_agent_id).first()
+            timeline_items.append({
+                "type": "visit",
+                "id": visit.id,
+                "title": "Site Visit",
+                "scheduled_date": visit.scheduled_date,
+                "project_name": visit.project_name,
+                "location": visit.location,
+                "outcome": visit.outcome,
+                "feedback": visit.feedback,
+                "created_at": visit.created_at,
+                "assigned_agent": {
+                    "id": agent.id,
+                    "first_name": agent.first_name,
+                    "last_name": agent.last_name,
+                } if agent else None
+            })
+
+    # Sort all items by created_at descending
+    timeline_items.sort(key=lambda x: x["created_at"], reverse=True)
+
+    # Paginate
+    total = len(timeline_items)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_items = timeline_items[start:end]
+
     return {
-        "data": result,
+        "data": paginated_items,
         "meta": {
             "total": total,
             "page": page,
@@ -125,6 +183,8 @@ def get_contact_timeline(
     contact_id: int,
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
+    include_notes: bool = True,
+    include_leads: bool = True,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -141,19 +201,19 @@ def get_contact_timeline(
     if not contact:
         raise HTTPException(status_code=404, detail="Contact not found")
 
-    query = db.query(models.Activity).filter(
+    timeline_items = []
+
+    # Get activities
+    activities = db.query(models.Activity).filter(
         models.Activity.contact_id == contact_id
-    ).order_by(models.Activity.created_at.desc())
+    ).order_by(models.Activity.created_at.desc()).all()
 
-    total = query.count()
-    activities = query.offset((page - 1) * per_page).limit(per_page).all()
-
-    result = []
     for activity in activities:
         user = db.query(models.User).filter(models.User.id == activity.user_id).first()
-        result.append({
+        timeline_items.append({
+            "type": "activity",
             "id": activity.id,
-            "activity_type": activity.activity_type.value,
+            "activity_type": activity.activity_type,
             "title": activity.title,
             "description": activity.description,
             "created_at": activity.created_at,
@@ -165,8 +225,58 @@ def get_contact_timeline(
             } if user else None
         })
 
+    # Get notes
+    if include_notes:
+        notes = db.query(models.Note).filter(
+            models.Note.contact_id == contact_id
+        ).order_by(models.Note.created_at.desc()).all()
+
+        for note in notes:
+            user = db.query(models.User).filter(models.User.id == note.created_by_id).first()
+            timeline_items.append({
+                "type": "note",
+                "id": note.id,
+                "title": "Note",
+                "content": note.content,
+                "is_pinned": note.is_pinned,
+                "created_at": note.created_at,
+                "user": {
+                    "id": user.id,
+                    "first_name": user.first_name,
+                    "last_name": user.last_name,
+                    "email": user.email
+                } if user else None
+            })
+
+    # Get related leads
+    if include_leads:
+        leads = db.query(models.Lead).filter(
+            models.Lead.contact_id == contact_id,
+            models.Lead.organisation_id == organisation.id
+        ).order_by(models.Lead.created_at.desc()).all()
+
+        for lead in leads:
+            timeline_items.append({
+                "type": "lead",
+                "id": lead.id,
+                "title": "Lead Created",
+                "name": lead.name,
+                "status": lead.status,
+                "priority": lead.priority,
+                "created_at": lead.created_at
+            })
+
+    # Sort all items by created_at descending
+    timeline_items.sort(key=lambda x: x["created_at"], reverse=True)
+
+    # Paginate
+    total = len(timeline_items)
+    start = (page - 1) * per_page
+    end = start + per_page
+    paginated_items = timeline_items[start:end]
+
     return {
-        "data": result,
+        "data": paginated_items,
         "meta": {
             "total": total,
             "page": page,

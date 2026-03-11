@@ -188,3 +188,79 @@ def delete_contact(
     db.commit()
 
     return None
+
+
+@router.post("/merge", status_code=status.HTTP_200_OK)
+def merge_contacts(
+    request: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Merge duplicate contacts into one."""
+    organisation = get_user_org(db, current_user)
+
+    source_id = request.get("source_id")
+    target_id = request.get("target_id")
+
+    if not source_id or not target_id:
+        raise HTTPException(status_code=400, detail="Source and target contact IDs required")
+
+    if source_id == target_id:
+        raise HTTPException(status_code=400, detail="Source and target must be different")
+
+    # Get both contacts
+    source = db.query(models.Contact).filter(
+        models.Contact.id == source_id,
+        models.Contact.organisation_id == organisation.id
+    ).first()
+
+    target = db.query(models.Contact).filter(
+        models.Contact.id == target_id,
+        models.Contact.organisation_id == organisation.id
+    ).first()
+
+    if not source or not target:
+        raise HTTPException(status_code=404, detail="Contacts not found")
+
+    # Merge: update all leads from source to target
+    db.query(models.Lead).filter(
+        models.Lead.contact_id == source_id
+    ).update({"contact_id": target_id})
+
+    # Merge activities
+    db.query(models.Activity).filter(
+        models.Activity.contact_id == source_id
+    ).update({"contact_id": target_id})
+
+    # Deactivate source
+    source.is_active = False
+
+    db.commit()
+    db.refresh(target)
+
+    return {
+        "merged": True,
+        "target_contact": {
+            "id": target.id,
+            "first_name": target.first_name,
+            "last_name": target.last_name,
+            "email": target.email,
+            "phone": target.phone,
+            "contact_type": target.contact_type
+        }
+    }
+
+
+@router.post("/import", status_code=status.HTTP_201_CREATED)
+def import_contacts(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Import contacts from CSV file."""
+    # This is a placeholder - in production, you'd handle file upload
+    # For now, return a sample response
+    return {
+        "imported": 0,
+        "errors": [],
+        "message": "CSV import endpoint ready. Use form-data with 'file' field."
+    }

@@ -18,18 +18,26 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Create enum types
-    user_role_enum = sa.Enum('owner', 'admin', 'manager', 'agent', 'finance', 'viewer', name='userrole')
-    org_type_enum = sa.Enum('developer', 'broker', 'both', name='organisationtype')
-    user_role_enum.create(op.get_bind(), checkfirst=True)
-    org_type_enum.create(op.get_bind(), checkfirst=True)
+    # Create enum types (skip for SQLite)
+    from sqlalchemy import inspect
+    engine = op.get_bind()
+    if engine.dialect.name != 'sqlite':
+        user_role_enum = sa.Enum('owner', 'admin', 'manager', 'agent', 'finance', 'viewer', name='userrole')
+        org_type_enum = sa.Enum('developer', 'broker', 'both', name='organisationtype')
+        user_role_enum.create(op.get_bind(), checkfirst=True)
+        org_type_enum.create(op.get_bind(), checkfirst=True)
+        org_type_col = sa.Enum('developer', 'broker', 'both', name='organisationtype', create_type=False)
+        user_role_col = sa.Enum('owner', 'admin', 'manager', 'agent', 'finance', 'viewer', name='userrole', create_type=False)
+    else:
+        org_type_col = sa.String(length=20)
+        user_role_col = sa.String(length=20)
 
     # Create organisations table
     op.create_table(
         'organisations',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(length=255), nullable=False),
-        sa.Column('type', sa.Enum('developer', 'broker', 'both', name='organisationtype'), nullable=True),
+        sa.Column('type', org_type_col, nullable=True),
         sa.Column('rera_number', sa.String(length=50), nullable=True),
         sa.Column('logo', sa.String(length=500), nullable=True),
         sa.Column('cover_image', sa.String(length=500), nullable=True),
@@ -40,7 +48,7 @@ def upgrade() -> None:
         sa.Column('address', sa.Text(), nullable=True),
         sa.Column('business_hours', sa.String(length=255), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
@@ -58,7 +66,7 @@ def upgrade() -> None:
         sa.Column('avatar', sa.String(length=500), nullable=True),
         sa.Column('is_email_verified', sa.Boolean(), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.PrimaryKeyConstraint('id')
     )
@@ -72,7 +80,7 @@ def upgrade() -> None:
         sa.Column('token', sa.String(length=500), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
@@ -85,9 +93,9 @@ def upgrade() -> None:
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('organisation_id', sa.Integer(), nullable=False),
-        sa.Column('role', sa.Enum('owner', 'admin', 'manager', 'agent', 'finance', 'viewer', name='userrole'), nullable=True),
+        sa.Column('role', user_role_col, nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
         sa.PrimaryKeyConstraint('id')
@@ -112,7 +120,7 @@ def upgrade() -> None:
         sa.Column('created_by', sa.Integer(), nullable=True),
         sa.Column('assigned_to', sa.Integer(), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
@@ -129,7 +137,7 @@ def upgrade() -> None:
         sa.Column('name', sa.String(length=100), nullable=False),
         sa.Column('is_default', sa.Boolean(), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
@@ -159,7 +167,7 @@ def upgrade() -> None:
         sa.Column('notes', sa.Text(), nullable=True),
         sa.Column('lost_reason', sa.String(length=255), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['organisation_id'], ['organisations.id'], ),
         sa.ForeignKeyConstraint(['contact_id'], ['contacts.id'], ),
