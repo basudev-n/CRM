@@ -1,10 +1,13 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
 from jose import jwt, JWTError
 import os
+import logging
+import traceback
 from app.config import settings
-from app.database import ensure_runtime_tables, ensure_sqlite_compatibility, SessionLocal
+from app.database import ensure_runtime_tables, ensure_sqlite_compatibility, SessionLocal, engine
 
 # Import routers
 from app.auth.router import router as auth_router
@@ -262,13 +265,58 @@ def root():
 
 @app.get("/health")
 def health_check():
-    return {"status": "healthy"}
+    """Health check that actually tests database connectivity."""
+    from sqlalchemy import text
+    try:
+        db = SessionLocal()
+        try:
+            result = db.execute(text("SELECT 1"))
+            result.scalar()
+            # Also check if tables exist
+            tables = db.execute(text(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema='public' LIMIT 5"
+            )).fetchall()
+            table_names = [r[0] for r in tables]
+            return {
+                "status": "healthy",
+                "database": "connected",
+                "sample_tables": table_names,
+                "db_url_prefix": settings.DATABASE_URL[:30] + "..."
+            }
+        finally:
+            db.close()
+    except Exception as e:
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "unhealthy",
+                "database": "disconnected",
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "db_url_prefix": settings.DATABASE_URL[:30] + "..."
+            }
+        )
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch-all exception handler that logs the full traceback."""
+    logging.error(f"Unhandled exception on {request.method} {request.url.path}: {exc}")
+    logging.error(traceback.format_exc())
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"Internal Server Error: {type(exc).__name__}: {str(exc)}"}
+    )
 
 
 @app.on_event("startup")
 def startup_compatibility_fixes():
+    logging.basicConfig(level=logging.INFO)
+    logging.info(f"Starting PropFlow CRM API")
+    logging.info(f"Database URL prefix: {settings.DATABASE_URL[:30]}...")
     try:
         ensure_sqlite_compatibility()
         ensure_runtime_tables()
     except Exception as e:
-        print(f"Startup DB check warning (non-fatal): {e}")
+        logging.warning(f"Startup DB check warning (non-fatal): {e}")
+        logging.warning(traceback.format_exc())

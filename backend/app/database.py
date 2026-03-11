@@ -1,9 +1,22 @@
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import NullPool
 from app.config import settings
 
-engine = create_engine(settings.DATABASE_URL, pool_pre_ping=True)
+# Fix postgres:// -> postgresql:// for SQLAlchemy 2.x compatibility
+database_url = settings.DATABASE_URL
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql://", 1)
+
+# Use NullPool for pgbouncer/Supabase Session Pooler compatibility
+# pgbouncer manages its own connection pool, so SQLAlchemy shouldn't pool
+engine_kwargs = {"pool_pre_ping": True}
+if "pooler.supabase.com" in database_url or "supabase" in database_url:
+    engine_kwargs["poolclass"] = NullPool
+    engine_kwargs.pop("pool_pre_ping", None)
+
+engine = create_engine(database_url, **engine_kwargs)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base = declarative_base()
