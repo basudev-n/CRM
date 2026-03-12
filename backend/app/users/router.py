@@ -5,6 +5,7 @@ from app.core.auth import get_current_user
 from app.auth.service import hash_password, create_tokens
 from app import schemas, models
 from app.models import User
+from app.utils.email import send_invite_email
 import secrets
 from datetime import datetime, timedelta
 
@@ -104,7 +105,20 @@ def invite_user(
     db.commit()
     db.refresh(invite)
 
-    # TODO: Send invite email with token link
+    # Send invite email
+    inviter_name = f"{current_user.first_name} {current_user.last_name or ''}".strip()
+    org = db.query(models.Organisation).filter(
+        models.Organisation.id == membership.organisation_id
+    ).first()
+    org_name = org.name if org else "your organisation"
+    send_invite_email(
+        to_email=request.email,
+        first_name=request.first_name,
+        organisation_name=org_name,
+        role=role.value,
+        invite_token=invite_token,
+        inviter_name=inviter_name,
+    )
 
     return {
         "message": f"Invitation sent to {request.email}",
@@ -248,11 +262,11 @@ def accept_invite(
         db.commit()
         
         # Generate tokens
-        tokens = auth_service.create_tokens(db, existing_user)
+        tokens = create_tokens(db, existing_user)
         return tokens
     
     # Create new user
-    password_hash = auth_service.hash_password(request.password)
+    password_hash = hash_password(request.password)
     
     new_user = models.User(
         email=invite.email,
@@ -279,7 +293,7 @@ def accept_invite(
     db.refresh(new_user)
     
     # Generate tokens
-    tokens = auth_service.create_tokens(db, new_user)
+    tokens = create_tokens(db, new_user)
     return tokens
 
 
