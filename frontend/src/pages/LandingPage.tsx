@@ -1,7 +1,6 @@
 import { useState } from "react"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
-import { useAuthStore } from "@/app/store"
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import {
   Building2,
@@ -166,7 +165,6 @@ const TESTIMONIALS = [
 ]
 
 export default function LandingPage() {
-  const { isAuthenticated } = useAuthStore()
   const [billingCycle, setBillingCycle] = useState<"monthly" | "yearly">("yearly")
 
   const formatCurrency = (amount: number) =>
@@ -200,27 +198,16 @@ export default function LandingPage() {
               </a>
             </div>
             <div className="flex items-center gap-3">
-              {isAuthenticated ? (
-                <Link to="/dashboard">
-                  <Button className="bg-zinc-900 hover:bg-zinc-800 text-white font-medium rounded-full px-5">
-                    Go to Dashboard
-                    <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </Link>
-              ) : (
-                <>
-                  <Link to="/login">
-                    <Button variant="ghost" className="font-medium text-zinc-600 hover:text-zinc-900">
-                      Sign In
-                    </Button>
-                  </Link>
-                  <Link to="/signup">
-                    <Button className="bg-zinc-900 hover:bg-zinc-800 text-white font-medium rounded-full px-5">
-                      Start Free Trial
-                    </Button>
-                  </Link>
-                </>
-              )}
+              <Link to="/login">
+                <Button variant="ghost" className="font-medium text-zinc-600 hover:text-zinc-900">
+                  Sign In
+                </Button>
+              </Link>
+              <Link to="/signup">
+                <Button className="bg-zinc-900 hover:bg-zinc-800 text-white font-medium rounded-full px-5">
+                  Start Free Trial
+                </Button>
+              </Link>
             </div>
           </div>
         </div>
@@ -628,78 +615,21 @@ export default function LandingPage() {
       </section>
 
       {/* CTA Section */}
-      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-white">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid lg:grid-cols-2 gap-6">
-            {/* Get Started - Light Card */}
-            <div className="bg-[#F7F5F2] rounded-3xl p-8 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="h-10 w-10 rounded-2xl bg-white flex items-center justify-center">
-                    <Rocket className="h-5 w-5 text-zinc-900" />
-                  </div>
-                  <span className="text-lg font-semibold text-zinc-900">Get Started</span>
-                </div>
-                <h3 className="text-2xl md:text-3xl font-semibold text-zinc-900 mb-2">
-                  Ready to transform<br />your sales?
-                </h3>
-                <p className="text-zinc-600 mt-4 mb-8">
-                  Join 500+ real estate companies already using PropFlow to close more deals, faster.
-                </p>
-              </div>
-              <div>
-                <Link to="/signup">
-                  <Button className="bg-zinc-900 hover:bg-zinc-800 text-white rounded-full px-6 h-11 text-sm font-medium">
-                    Start Your Free Trial <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </Link>
-                <p className="mt-4 text-sm text-zinc-500">No credit card required</p>
-              </div>
-            </div>
-
-            {/* 14-Day Trial - Dark Card */}
-            <div className="bg-zinc-900 rounded-3xl p-8 text-white flex flex-col justify-between">
-              <div>
-                <div className="flex items-center gap-3 mb-6">
-                  <div className="h-10 w-10 rounded-2xl bg-white/10 flex items-center justify-center">
-                    <Sparkles className="h-5 w-5 text-amber-400" />
-                  </div>
-                  <span className="text-lg font-semibold text-white">Free Trial</span>
-                  <span className="px-3 py-1 bg-amber-500/20 text-amber-400 text-xs font-medium rounded-full">
-                    14 Days
-                  </span>
-                </div>
-                <h3 className="text-2xl md:text-3xl font-semibold text-white mb-2">
-                  14 days of PropFlow,<br />
-                  <span className="text-zinc-400">completely free.</span>
-                </h3>
-                <p className="text-zinc-400 mt-4 mb-8">
-                  Full access to all features. Set up your team, import leads, and start closing deals today.
-                </p>
-              </div>
-              <div>
-                <div className="flex flex-wrap gap-4 text-sm text-zinc-300 mb-6">
-                  <div className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-zinc-500" />
-                    <span>All features included</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-zinc-500" />
-                    <span>No credit card</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Check className="h-4 w-4 text-zinc-500" />
-                    <span>Cancel anytime</span>
-                  </div>
-                </div>
-                <Link to="/signup">
-                  <Button className="bg-white hover:bg-zinc-100 text-zinc-900 rounded-full px-6 h-11 text-sm font-medium">
-                    Get Started Now <ArrowRight className="ml-2 h-4 w-4" />
-                  </Button>
-                </Link>
-              </div>
-            </div>
-          </div>
+      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-zinc-900">
+        <div className="max-w-4xl mx-auto text-center">
+          <h2 className="text-4xl md:text-5xl font-light text-white mb-4">
+            Ready to <span className="font-semibold">transform</span> your sales?
+          </h2>
+          <p className="text-xl text-zinc-400 mb-10 max-w-2xl mx-auto">
+            Join 500+ real estate companies already using PropFlow to close more deals.
+          </p>
+          <Link to="/signup">
+            <Button size="lg" className="bg-zinc-900 hover:bg-zinc-800 text-white h-14 px-10 text-lg font-medium rounded-full">
+              Start Your Free Trial
+              <ArrowRight className="ml-2 h-5 w-5" />
+            </Button>
+          </Link>
+          <p className="mt-6 text-sm text-zinc-500">14-day free trial • No credit card required</p>
         </div>
       </section>
 

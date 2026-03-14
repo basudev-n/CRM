@@ -34,48 +34,89 @@ export function TrialDashboardWidget() {
   // Expired state
   if (isTrialExpired) {
     return (
-      <div className="bg-zinc-900 rounded-3xl p-8 text-white flex flex-col">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="h-10 w-10 rounded-2xl bg-red-500/20 flex items-center justify-center">
-            <AlertTriangle className="h-5 w-5 text-red-400" />
-          </div>
-          <span className="text-lg font-semibold text-white">Trial Ended</span>
-        </div>
+      <Card className="border-2 border-red-200 bg-gradient-to-br from-red-50 to-orange-50 shadow-lg overflow-hidden">
+        <CardContent className="p-0">
+          <div className="p-6">
+            <div className="flex items-start gap-4">
+              <div className="w-12 h-12 rounded-2xl bg-red-100 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="h-6 w-6 text-red-600" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-red-800">Your trial has ended</h3>
+                <p className="text-sm text-red-600 mt-1">
+                  Upgrade now to continue using PropFlow and keep all your data safe.
+                </p>
+                
+                <div className="mt-4 p-4 bg-white/60 rounded-xl">
+                  <p className="text-sm font-medium text-zinc-700 mb-2">You're about to lose access to:</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { icon: Users, label: "All contacts & leads" },
+                      { icon: BarChart3, label: "Reports & analytics" },
+                      { icon: Shield, label: "Data export" },
+                      { icon: TrendingUp, label: "Pipeline tracking" },
+                    ].map((item, i) => (
+                      <div key={i} className="flex items-center gap-2 text-sm text-red-700">
+                        <item.icon className="h-4 w-4" />
+                        <span>{item.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-        <h3 className="text-2xl md:text-3xl font-semibold text-white mb-2">
-          Your trial has ended.
-        </h3>
-        <p className="text-zinc-400 mt-2 mb-6">
-          Upgrade now to continue using PropFlow and keep all your data safe.
-        </p>
-
-        <div className="flex flex-wrap gap-3 text-sm text-zinc-300 mb-8">
-          {[
-            { icon: Users, label: "All contacts & leads" },
-            { icon: BarChart3, label: "Reports & analytics" },
-            { icon: Shield, label: "Data export" },
-            { icon: TrendingUp, label: "Pipeline tracking" },
-          ].map((item, i) => (
-            <div key={i} className="flex items-center gap-2">
-              <item.icon className="h-4 w-4 text-zinc-500" />
-              <span>{item.label}</span>
+                <Link to="/settings/billing" className="block mt-4">
+                  <Button className="w-full bg-red-600 hover:bg-red-700 text-white">
+                    <Zap className="h-4 w-4 mr-2" />
+                    Upgrade Now to Keep Your Data
+                  </Button>
+                </Link>
+              </div>
             </div>
-          ))}
-        </div>
-
-        <div className="mt-auto">
-          <Link to="/settings/billing">
-            <Button className="bg-red-500 hover:bg-red-600 text-white rounded-full px-6 h-11 text-sm font-medium">
-              <Zap className="h-4 w-4 mr-2" />
-              Upgrade Now
-            </Button>
-          </Link>
-        </div>
-      </div>
+          </div>
+        </CardContent>
+      </Card>
     )
   }
 
   if (!isOnTrial) return null
+
+  // Dynamic styling based on urgency
+  const getWidgetStyle = () => {
+    switch (urgencyLevel) {
+      case 3: // High urgency (< 3 days)
+        return {
+          border: "border-2 border-orange-300",
+          bg: "bg-gradient-to-br from-amber-50 via-orange-50 to-red-50",
+          iconBg: "bg-gradient-to-br from-amber-500 to-orange-500",
+          progressBg: "bg-orange-200",
+          progressFill: "bg-gradient-to-r from-amber-500 to-orange-500",
+          title: "Your trial is ending soon!",
+          subtitle: "Don't lose your progress",
+        }
+      case 2: // Medium urgency (3-7 days)
+        return {
+          border: "border border-amber-200",
+          bg: "bg-gradient-to-br from-amber-50 to-yellow-50",
+          iconBg: "bg-gradient-to-br from-amber-400 to-yellow-500",
+          progressBg: "bg-amber-200",
+          progressFill: "bg-amber-500",
+          title: `${trialDaysRemaining} days left in your trial`,
+          subtitle: "Explore premium features",
+        }
+      default: // Low urgency (> 7 days)
+        return {
+          border: "border border-zinc-200",
+          bg: "bg-gradient-to-br from-zinc-50 to-slate-50",
+          iconBg: "bg-gradient-to-br from-zinc-700 to-zinc-900",
+          progressBg: "bg-zinc-200",
+          progressFill: "bg-zinc-700",
+          title: `${trialDaysRemaining} days of free trial remaining`,
+          subtitle: "Take your time to explore",
+        }
+    }
+  }
+
+  const style = getWidgetStyle()
 
   const premiumFeatures = [
     { icon: Users, label: "Unlimited team members" },
@@ -85,79 +126,98 @@ export function TrialDashboardWidget() {
   ]
 
   return (
-    <div className="bg-zinc-900 rounded-3xl p-8 text-white flex flex-col">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <div className="h-10 w-10 rounded-2xl bg-white/10 flex items-center justify-center">
-          {urgencyLevel >= 2 ? (
-            <Clock className="h-5 w-5 text-amber-400" />
-          ) : (
-            <Crown className="h-5 w-5 text-white" />
+    <Card className={`${style.border} ${style.bg} shadow-lg overflow-hidden`}>
+      <CardContent className="p-0">
+        <div className="p-6">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className={`w-12 h-12 rounded-2xl ${style.iconBg} flex items-center justify-center flex-shrink-0 text-white`}>
+                {urgencyLevel >= 2 ? (
+                  <Clock className="h-6 w-6" />
+                ) : (
+                  <Crown className="h-6 w-6" />
+                )}
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-zinc-900">{style.title}</h3>
+                <p className="text-sm text-zinc-500 mt-0.5">{style.subtitle}</p>
+              </div>
+            </div>
+            
+            <div className="text-right hidden sm:block">
+              <div className="text-3xl font-bold text-zinc-900">{trialDaysRemaining}</div>
+              <div className="text-xs text-zinc-500">days left</div>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="mt-5">
+            <div className="flex justify-between text-xs mb-2">
+              <span className="text-zinc-500">Trial progress</span>
+              <span className="font-medium text-zinc-700">{trialProgress}% used</span>
+            </div>
+            <div className={`h-2 rounded-full ${style.progressBg} overflow-hidden`}>
+              <div 
+                className={`h-full ${style.progressFill} rounded-full transition-all duration-500`}
+                style={{ width: `${trialProgress}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Premium features */}
+          <div className="mt-5 grid grid-cols-2 gap-2">
+            {premiumFeatures.map((feature, i) => (
+              <div 
+                key={i} 
+                className="flex items-center gap-2 text-sm text-zinc-600 bg-white/50 rounded-lg px-3 py-2"
+              >
+                <CheckCircle className="h-4 w-4 text-emerald-500 flex-shrink-0" />
+                <span>{feature.label}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* CTA */}
+          <div className="mt-5 flex flex-col sm:flex-row gap-3">
+            <Link to="/settings/billing" className="flex-1">
+              <Button 
+                className={`w-full ${
+                  urgencyLevel >= 2 
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600' 
+                    : 'bg-zinc-900 hover:bg-zinc-800'
+                } text-white`}
+              >
+                <Sparkles className="h-4 w-4 mr-2" />
+                {urgencyLevel >= 2 ? 'Upgrade Now' : 'View Plans'}
+              </Button>
+            </Link>
+            <Link to="/settings/billing" className="sm:w-auto">
+              <Button variant="outline" className="w-full">
+                Compare Plans
+                <ArrowRight className="h-4 w-4 ml-2" />
+              </Button>
+            </Link>
+          </div>
+
+          {/* Social proof */}
+          {urgencyLevel >= 2 && (
+            <div className="mt-4 flex items-center gap-3 p-3 bg-white/60 rounded-xl">
+              <div className="flex -space-x-2">
+                {[1, 2, 3].map((i) => (
+                  <div 
+                    key={i}
+                    className="w-7 h-7 rounded-full bg-gradient-to-br from-zinc-300 to-zinc-400 border-2 border-white"
+                  />
+                ))}
+              </div>
+              <p className="text-xs text-zinc-600">
+                <span className="font-medium">2,400+ teams</span> upgraded this month
+              </p>
+            </div>
           )}
         </div>
-        <span className="text-lg font-semibold text-white">Free Trial</span>
-        <span className={`px-3 py-1 text-xs font-medium rounded-full ${
-          urgencyLevel >= 2
-            ? "bg-amber-500/20 text-amber-400"
-            : "bg-white/10 text-white"
-        }`}>
-          {trialDaysRemaining} days left
-        </span>
-      </div>
-
-      <h3 className="text-2xl md:text-3xl font-semibold text-white mb-2">
-        {urgencyLevel >= 3
-          ? <>Trial ending soon,<br /><span className="text-zinc-400">don't lose your progress.</span></>
-          : <>Explore PropFlow,<br /><span className="text-zinc-400">completely free.</span></>
-        }
-      </h3>
-
-      {/* Progress bar */}
-      <div className="mt-6 mb-6">
-        <div className="flex justify-between text-xs mb-2">
-          <span className="text-zinc-400">Trial progress</span>
-          <span className="font-medium text-white">{trialProgress}% used</span>
-        </div>
-        <div className="h-2 rounded-full bg-white/10 overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all duration-500 ${
-              urgencyLevel >= 2 ? "bg-amber-500" : "bg-white"
-            }`}
-            style={{ width: `${trialProgress}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Premium features */}
-      <div className="flex flex-wrap gap-3 text-sm text-zinc-300 mb-8">
-        {premiumFeatures.map((feature, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <CheckCircle className="h-4 w-4 text-zinc-500" />
-            <span>{feature.label}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* CTA */}
-      <div className="mt-auto flex flex-col sm:flex-row gap-3">
-        <Link to="/settings/billing">
-          <Button className={`rounded-full px-6 h-11 text-sm font-medium ${
-            urgencyLevel >= 2
-              ? "bg-amber-500 hover:bg-amber-600 text-white"
-              : "bg-white hover:bg-zinc-100 text-zinc-900"
-          }`}>
-            <Sparkles className="h-4 w-4 mr-2" />
-            {urgencyLevel >= 2 ? "Upgrade Now" : "View Plans"}
-          </Button>
-        </Link>
-        <Link to="/settings/billing">
-          <Button variant="outline" className="rounded-full px-6 h-11 text-sm font-medium border-zinc-700 text-zinc-300 hover:bg-white/10 hover:text-white">
-            Compare Plans
-            <ArrowRight className="h-4 w-4 ml-2" />
-          </Button>
-        </Link>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   )
 }
 

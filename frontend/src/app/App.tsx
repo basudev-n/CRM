@@ -112,6 +112,12 @@ function AuthRoute({ children }: { children: ReactNode }) {
 }
 
 function LandingRoute() {
+  const { isAuthenticated, membership } = useAuthStore()
+
+  if (isAuthenticated && membership) {
+    return <Navigate to="/dashboard" replace />
+  }
+
   return <LandingPage />
 }
 

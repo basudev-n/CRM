@@ -136,10 +136,8 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-8">
-      <div className="grid lg:grid-cols-2 gap-6">
-        <OnboardingChecklist />
-        <TrialDashboardWidget />
-      </div>
+      <OnboardingChecklist />
+      <TrialDashboardWidget />
 
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-4">

@@ -352,14 +352,14 @@ export default function QuotationsPage() {
   const statusClasses = (status: string) => {
     switch (status) {
       case "accepted":
-        return "bg-emerald-50 text-emerald-700 border-emerald-200"
+        return "bg-emerald-500/15 text-emerald-300 border-emerald-400/30"
       case "sent":
-        return "bg-sky-50 text-sky-700 border-sky-200"
+        return "bg-sky-500/15 text-sky-300 border-sky-400/30"
       case "rejected":
       case "expired":
-        return "bg-rose-50 text-rose-700 border-rose-200"
+        return "bg-rose-500/15 text-rose-300 border-rose-400/30"
       default:
-        return "bg-amber-50 text-amber-700 border-amber-200"
+        return "bg-amber-500/15 text-amber-300 border-amber-400/30"
     }
   }
 
