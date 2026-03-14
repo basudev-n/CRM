@@ -244,7 +244,7 @@ def create_unit(
 @router.get("/units", status_code=status.HTTP_200_OK)
 def list_units(
     page: int = Query(1, ge=1),
-    per_page: int = Query(50, ge=1, le=200),
+    per_page: int = Query(50, ge=1, le=2000),
     tower_id: Optional[int] = None,
     project_id: Optional[int] = None,
     status: Optional[str] = None,

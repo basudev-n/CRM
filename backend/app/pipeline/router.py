@@ -209,6 +209,10 @@ def get_kanban_board(
                 "score": lead.score,
                 "source": lead.source,
                 "assigned_to": lead.assigned_to,
+                "budget_min": lead.budget_min,
+                "budget_max": lead.budget_max,
+                "project_interest": lead.project_interest,
+                "created_at": lead.created_at.isoformat() if lead.created_at else None,
                 "updated_at": lead.updated_at.isoformat() if lead.updated_at else None
             }
             for lead in leads if lead.status and lead.status.lower() == stage_name.lower()

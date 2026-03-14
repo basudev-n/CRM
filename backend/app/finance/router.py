@@ -1188,6 +1188,8 @@ def download_quotation_pdf(
         "name": organisation.name,
         "logo": organisation.logo,
         "address": organisation.address,
+        "gstin": organisation.gstin,
+        "pan": organisation.pan,
     }
 
     quotation_data = {
@@ -1195,16 +1197,26 @@ def download_quotation_pdf(
         "created_at": quotation.created_at.strftime("%Y-%m-%d") if quotation.created_at else "",
         "valid_until": quotation.valid_until.strftime("%Y-%m-%d") if quotation.valid_until else "N/A",
         "customer_name": quotation.customer_name,
+        "customer_email": quotation.customer_email or "",
+        "customer_phone": quotation.customer_phone or "",
+        "project_name": quotation.project_name,
+        "tower": quotation.tower or "",
+        "unit_number": quotation.unit_number or "",
+        "unit_type": quotation.unit_type or "",
+        "area_sqft": quotation.area_sqft,
         "base_price": quotation.base_price,
         "floor_premium": quotation.floor_premium,
         "plc": quotation.plc,
         "parking": quotation.parking,
         "club_membership": quotation.club_membership,
+        "other_charges": quotation.other_charges,
         "gst_amount": quotation.gst_amount,
         "stamp_duty": quotation.stamp_duty,
         "registration": quotation.registration,
         "total": quotation.total,
         "terms_conditions": quotation.terms_conditions,
+        "notes": quotation.notes,
+        "status": quotation.status,
     }
 
     try:
